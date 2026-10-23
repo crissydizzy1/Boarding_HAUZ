@@ -1,0 +1,5 @@
+# Room images are served as static files only; never execute uploaded content.
+Options -Indexes
+<FilesMatch "\.(?i:php[0-9]?|phtml|phar|cgi|pl|py|sh|asp|aspx|jsp|shtml)$">
+    Require all denied
+</FilesMatch>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" role="img" aria-labelledby="title">
+  <title id="title">Room photo unavailable</title>
+  <rect width="960" height="640" fill="#e6f2f2"/>
+  <path d="M0 430h960v210H0z" fill="#d5e7e5"/>
+  <rect x="170" y="292" width="620" height="208" rx="18" fill="#fff"/>
+  <path d="M195 257h250v102H195z" fill="#b8d8d3"/>
+  <path d="M465 345h300v155H465z" fill="#f8fbfa"/>
+  <path d="M170 478h620v24H170z" fill="#668e8d"/>
+  <path d="M215 500v55m530-55v55" stroke="#668e8d" stroke-width="16"/>
+  <text x="480" y="590" fill="#466b6b" font-family="Arial,sans-serif" font-size="26" text-anchor="middle">Room photo coming soon</text>
+</svg>
