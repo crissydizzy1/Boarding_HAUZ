@@ -3,6 +3,8 @@
  * Database connection. Configure these environment variables in production:
  * BOARDING_HAUZ_DB_HOST, BOARDING_HAUZ_DB_PORT, BOARDING_HAUZ_DB_NAME,
  * BOARDING_HAUZ_DB_USER, BOARDING_HAUZ_DB_PASSWORD.
+ * Optional: BOARDING_HAUZ_DB_SSL=1 (required by Aiven, TiDB Cloud, etc.)
+ *           BOARDING_HAUZ_DB_SSL_CA=/path/to/ca.pem (only if the host gives you a CA file)
  */
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
@@ -13,9 +15,18 @@ $username = getenv('BOARDING_HAUZ_DB_USER') ?: 'root';
 $password = getenv('BOARDING_HAUZ_DB_PASSWORD');
 $password = $password === false ? '' : $password;
 $database = getenv('BOARDING_HAUZ_DB_NAME') ?: 'boarding_hauz';
+$useSsl = in_array(strtolower((string) getenv('BOARDING_HAUZ_DB_SSL')), ['1', 'true', 'yes', 'on'], true);
+$sslCa = getenv('BOARDING_HAUZ_DB_SSL_CA') ?: null;
 
 try {
-    $conn = new mysqli($host, $username, $password, $database, $port);
+    $conn = mysqli_init();
+    $flags = 0;
+    if ($useSsl) {
+        $conn->ssl_set(null, null, $sslCa, null, null);
+        // Without a CA file, encrypt but skip certificate verification.
+        $flags = $sslCa ? MYSQLI_CLIENT_SSL : MYSQLI_CLIENT_SSL | MYSQLI_CLIENT_SSL_DONT_VERIFY_SERVER_CERT;
+    }
+    $conn->real_connect($host, $username, $password, $database, $port, null, $flags);
     $conn->set_charset('utf8mb4');
 } catch (mysqli_sql_exception $exception) {
     error_log('Boarding Hauz database connection failed: ' . $exception->getMessage());
