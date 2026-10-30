@@ -6,15 +6,10 @@ RUN apt-get update \
     && docker-php-ext-install mysqli mbstring \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the application files into Apache's web root
+# Copy your application files into the boarding_hauz subfolder
 COPY boarding_hauz/ /var/www/html/boarding_hauz/
 
-# Point Apache's DocumentRoot to the boarding_hauz folder and grant permissions
-RUN sed -i 's|DocumentRoot /var/www/html|DocumentRoot /var/www/html/boarding_hauz|g' /etc/apache2/sites-available/000-default.conf \
-    && echo '<Directory /var/www/html/boarding_hauz/>' >> /etc/apache2/apache2.conf \
-    && echo '    Options Indexes FollowSymLinks' >> /etc/apache2/apache2.conf \
-    && echo '    AllowOverride All' >> /etc/apache2/apache2.conf \
-    && echo '    Require all granted' >> /etc/apache2/apache2.conf \
-    && echo '</Directory>' >> /etc/apache2/apache2.conf
+# Create a simple redirect in Apache's default root so visiting the base URL goes straight to your app
+RUN echo "<?php header('Location: /boarding_hauz/'); exit;" > /var/www/html/index.php
 
 EXPOSE 80
