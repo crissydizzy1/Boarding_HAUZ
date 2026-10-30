@@ -5,8 +5,7 @@ function getCurrentMonthPaymentDue(
     int $tenantId,
     float $monthlyRate,
     ?string $moveInDate = null,
-    ?DateTimeImmutable $today = null,
-    int $leaseId = 0
+    ?DateTimeImmutable $today = null
 ): array
 {
     $today = $today ?? new DateTimeImmutable('today');
@@ -40,14 +39,12 @@ function getCurrentMonthPaymentDue(
         return $summary;
     }
 
-    $paymentScope = $leaseId > 0 ? 'lease_id = ?' : 'tenant_id = ?';
-    $scopeId = $leaseId > 0 ? $leaseId : $tenantId;
     $stmt = $conn->prepare("
         SELECT
-            COALESCE(SUM(status IN ('Approved', 'Verified', 'Paid')), 0) AS confirmed_count,
-            COALESCE(SUM(status IN ('Pending Verification', 'Pending')), 0) AS pending_count
+            COALESCE(SUM(status IN ('Verified', 'Paid')), 0) AS confirmed_count,
+            COALESCE(SUM(status = 'Pending'), 0) AS pending_count
         FROM payments
-        WHERE {$paymentScope}
+        WHERE tenant_id = ?
           AND payment_date >= ?
           AND payment_date < ?
     ");
@@ -55,10 +52,10 @@ function getCurrentMonthPaymentDue(
         throw new mysqli_sql_exception($conn->error);
     }
 
-    $getCyclePaymentCounts = static function (DateTimeImmutable $cycleDate) use ($stmt, $scopeId): array {
+    $getCyclePaymentCounts = static function (DateTimeImmutable $cycleDate) use ($stmt, $tenantId): array {
         $monthStart = $cycleDate->modify('first day of this month')->format('Y-m-d');
         $nextMonthStart = $cycleDate->modify('first day of next month')->format('Y-m-d');
-        $stmt->bind_param('iss', $scopeId, $monthStart, $nextMonthStart);
+        $stmt->bind_param('iss', $tenantId, $monthStart, $nextMonthStart);
         $stmt->execute();
         return $stmt->get_result()->fetch_assoc() ?: [];
     };

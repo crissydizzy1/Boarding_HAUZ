@@ -4,8 +4,7 @@ requireRole('landlord');
 
 $admin_title = 'Maintenance Management';
 $branchId = requireSelectedBranch();
-$statuses = ['Pending', 'In Progress', 'Resolved'];
-$filterStatuses = ['Pending', 'In Progress', 'Resolved', 'Closed'];
+$statuses = ['Pending', 'In Progress', 'Resolved', 'Closed'];
 $successMessages = [
     'updated' => 'Maintenance request status was updated successfully.',
 ];
@@ -31,7 +30,7 @@ $stmt->close();
 $search = is_string($_GET['search'] ?? null) ? trim($_GET['search']) : '';
 $search = substr($search, 0, 100);
 $filterStatus = is_string($_GET['status'] ?? null) ? $_GET['status'] : '';
-if (!in_array($filterStatus, $filterStatuses, true)) {
+if (!in_array($filterStatus, $statuses, true)) {
     $filterStatus = '';
 }
 $filterCategory = is_string($_GET['category'] ?? null) ? trim($_GET['category']) : '';
@@ -51,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $hasMaintenanceTable) {
     if ($postSearch !== '') {
         $redirectParameters['search'] = $postSearch;
     }
-    if (in_array($postStatus, $filterStatuses, true)) {
+    if (in_array($postStatus, $statuses, true)) {
         $redirectParameters['status'] = $postStatus;
     }
     if ($postCategory !== '') {
@@ -64,41 +63,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $hasMaintenanceTable) {
         $error = 'Select a valid maintenance request and status.';
     } else {
         try {
-            $stmt = $conn->prepare("SELECT status FROM maintenance_requests WHERE id = ? AND branch_id = ? LIMIT 1");
-            $stmt->bind_param('ii', $requestId, $branchId);
+            $stmt = $conn->prepare("UPDATE maintenance_requests SET status = ? WHERE id = ? AND branch_id = ? LIMIT 1");
+            $stmt->bind_param('sii', $newStatus, $requestId, $branchId);
             $stmt->execute();
-            $request = $stmt->get_result()->fetch_assoc();
+            $affectedRows = $stmt->affected_rows;
             $stmt->close();
 
-            if (!$request) {
-                $error = 'The selected maintenance request could not be found.';
-            } else {
-                $allowedNextStatus = [
-                    'Pending' => 'In Progress',
-                    'In Progress' => 'Resolved',
-                ];
-                $currentStatus = (string) $request['status'];
-                if (($allowedNextStatus[$currentStatus] ?? null) !== $newStatus) {
-                    $error = 'Maintenance status must progress from Pending to In Progress to Resolved.';
+            if ($affectedRows === 0) {
+                $stmt = $conn->prepare("SELECT id, status FROM maintenance_requests WHERE id = ? AND branch_id = ? LIMIT 1");
+                $stmt->bind_param('ii', $requestId, $branchId);
+                $stmt->execute();
+                $existingRequest = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                if (!$existingRequest) {
+                    $error = 'The selected maintenance request could not be found.';
+                } elseif ($existingRequest['status'] !== $newStatus) {
+                    $error = 'The maintenance request status was not changed. Please refresh and try again.';
                 } else {
-                    $stmt = $conn->prepare("UPDATE maintenance_requests SET status = ? WHERE id = ? AND branch_id = ? AND status = ? LIMIT 1");
-                    $stmt->bind_param('siis', $newStatus, $requestId, $branchId, $currentStatus);
-                    $stmt->execute();
-                    $affectedRows = $stmt->affected_rows;
-                    $stmt->close();
-
-                    if ($affectedRows !== 1) {
-                        $error = 'The maintenance request status changed before this update could be saved.';
-                    } else {
-                        $redirectParameters['success'] = 'updated';
-                        $redirectUrl = '/boarding_hauz/landlord/maintenance.php';
-                        if ($redirectParameters) {
-                            $redirectUrl .= '?' . http_build_query($redirectParameters);
-                        }
-                        header('Location: ' . $redirectUrl);
-                        exit;
-                    }
+                    $error = 'The request already has that status.';
                 }
+            } else {
+                $redirectParameters['success'] = 'updated';
+                $redirectUrl = '/boarding_hauz/landlord/maintenance.php';
+                if ($redirectParameters) {
+                    $redirectUrl .= '?' . http_build_query($redirectParameters);
+                }
+                header('Location: ' . $redirectUrl);
+                exit;
             }
         } catch (mysqli_sql_exception $exception) {
             error_log('Maintenance status update failed: ' . $exception->getMessage());
@@ -129,7 +120,7 @@ if ($hasMaintenanceTable) {
     $stmt = $conn->prepare("
         SELECT DISTINCT category
         FROM maintenance_requests mr
-        LEFT JOIN tenants t ON t.id = mr.tenant_id
+        LEFT JOIN tenants t ON t.id = mr.tenant_id AND t.branch_id = mr.branch_id
         LEFT JOIN rooms r ON r.id = mr.room_id AND r.branch_id = mr.branch_id
         WHERE mr.branch_id = ? AND mr.category IS NOT NULL AND mr.category <> ''
         ORDER BY mr.category
@@ -153,7 +144,7 @@ if ($hasMaintenanceTable) {
             u.username, u.email,
             r.room_number, r.room_type
         FROM maintenance_requests mr
-        LEFT JOIN tenants t ON t.id = mr.tenant_id
+        LEFT JOIN tenants t ON t.id = mr.tenant_id AND t.branch_id = mr.branch_id
         LEFT JOIN users u ON u.id = t.user_id
         LEFT JOIN rooms r ON r.id = mr.room_id AND r.branch_id = mr.branch_id
     ";
@@ -214,7 +205,7 @@ if ($hasMaintenanceTable) {
                 u.username, u.email,
                 r.room_number, r.room_type
             FROM maintenance_requests mr
-            LEFT JOIN tenants t ON t.id = mr.tenant_id
+            LEFT JOIN tenants t ON t.id = mr.tenant_id AND t.branch_id = mr.branch_id
             LEFT JOIN users u ON u.id = t.user_id
             LEFT JOIN rooms r ON r.id = mr.room_id AND r.branch_id = mr.branch_id
             WHERE mr.id = ? AND mr.branch_id = ?
@@ -353,7 +344,7 @@ include __DIR__ . '/../admin/admin_header.php';
                     <input type="search" name="search" value="<?= e($search); ?>" placeholder="Search tenant or room number" aria-label="Search tenant name or room number">
                     <select name="status" aria-label="Filter by maintenance status">
                         <option value="">All Statuses</option>
-                        <?php foreach ($filterStatuses as $statusOption): ?>
+                        <?php foreach ($statuses as $statusOption): ?>
                             <option value="<?= e($statusOption); ?>" <?= $filterStatus === $statusOption ? 'selected' : ''; ?>><?= e($statusOption); ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -390,19 +381,20 @@ include __DIR__ . '/../admin/admin_header.php';
                                         <td>
                                             <div class="maintenance-actions">
                                                 <a class="maintenance-button" href="maintenance.php?view=<?= (int) $request['id']; ?><?= $search !== '' ? '&amp;search=' . rawurlencode($search) : ''; ?><?= $filterStatus !== '' ? '&amp;status=' . rawurlencode($filterStatus) : ''; ?><?= $filterCategory !== '' ? '&amp;category=' . rawurlencode($filterCategory) : ''; ?>">View Details</a>
-                                                <?php if (isset(['Pending' => 'In Progress', 'In Progress' => 'Resolved'][$request['status']])): ?>
                                                 <form method="post" class="maintenance-update">
                                                     <input type="hidden" name="csrf_token" value="<?= e($_SESSION['admin_maintenance_csrf']); ?>">
                                                     <input type="hidden" name="request_id" value="<?= (int) $request['id']; ?>">
                                                     <input type="hidden" name="search" value="<?= e($search); ?>">
                                                     <input type="hidden" name="filter_status" value="<?= e($filterStatus); ?>">
                                                     <input type="hidden" name="filter_category" value="<?= e($filterCategory); ?>">
-                                                    <input type="hidden" name="status" value="<?= e(['Pending' => 'In Progress', 'In Progress' => 'Resolved'][$request['status']]); ?>">
-                                                    <button class="maintenance-button maintenance-button-primary" type="submit">Mark <?= e(['Pending' => 'In Progress', 'In Progress' => 'Resolved'][$request['status']]); ?></button>
+                                                    <label class="visually-hidden" for="request-status-<?= (int) $request['id']; ?>">New status for request <?= (int) $request['id']; ?></label>
+                                                    <select id="request-status-<?= (int) $request['id']; ?>" name="status" required>
+                                                        <?php foreach ($statuses as $statusOption): ?>
+                                                            <option value="<?= e($statusOption); ?>" <?= $request['status'] === $statusOption ? 'selected' : ''; ?>><?= e($statusOption); ?></option>
+                                                        <?php endforeach; ?>
+                                                    </select>
+                                                    <button class="maintenance-button maintenance-button-primary" type="submit">Update Status</button>
                                                 </form>
-                                                <?php else: ?>
-                                                    <span>No further status</span>
-                                                <?php endif; ?>
                                             </div>
                                         </td>
                                     </tr>

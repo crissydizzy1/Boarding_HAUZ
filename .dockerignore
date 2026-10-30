@@ -1,0 +1,15 @@
+# Keep repository metadata and local secrets out of Docker build context
+.git
+.vscode
+.env
+.env.*
+!.env.example
+.idea
+
+# Local build/cache files
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+node_modules
+vendor

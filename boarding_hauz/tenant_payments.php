@@ -8,13 +8,14 @@ $userId = (int) $_SESSION['user_id'];
 $error = '';
 $tenant = null;
 $landlordPaymentSettings = null;
-$leaseOptions = [];
-$selectedLeaseId = 0;
 try {
     $stmt = $conn->prepare("
-        SELECT t.id AS tenant_id, t.full_name, t.status AS tenant_status
+        SELECT t.id AS tenant_id, t.branch_id, t.full_name, t.move_in_date, t.status AS tenant_status,
+               r.id AS room_id, r.room_number, r.room_type, r.monthly_rate
         FROM tenants t
+        LEFT JOIN rooms r ON r.id = t.room_id
         WHERE t.user_id = ?
+        ORDER BY (LOWER(t.status) = 'active') DESC, t.id DESC
         LIMIT 1
     ");
     if (!$stmt) {
@@ -24,40 +25,6 @@ try {
     $stmt->execute();
     $tenant = $stmt->get_result()->fetch_assoc();
     $stmt->close();
-    if ($tenant) {
-        $tenantId = (int) $tenant['tenant_id'];
-        $leaseStmt = $conn->prepare("
-            SELECT l.id AS lease_id, l.move_in_date, l.monthly_rate,
-                   r.id AS room_id, r.room_number, r.room_type, r.branch_id, b.branch_name, b.location
-            FROM tenant_leases l
-            INNER JOIN rooms r ON r.id = l.room_id
-            INNER JOIN branches b ON b.id = r.branch_id
-            WHERE l.tenant_id = ? AND l.status = 'active'
-            ORDER BY l.created_at DESC, l.id DESC
-        ");
-        $leaseStmt->bind_param('i', $tenantId);
-        $leaseStmt->execute();
-        $leaseOptions = $leaseStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-        $leaseStmt->close();
-
-        $requestedLeaseValue = is_scalar($_POST['lease_id'] ?? $_GET['lease_id'] ?? null)
-            ? (string) ($_POST['lease_id'] ?? $_GET['lease_id'])
-            : '';
-        $selectedLeaseId = ctype_digit($requestedLeaseValue) ? (int) $requestedLeaseValue : 0;
-        $selectedLeaseFound = false;
-        foreach ($leaseOptions as $leaseOption) {
-            if ($selectedLeaseId === 0 || $selectedLeaseId === (int) $leaseOption['lease_id']) {
-                $tenant = array_merge($tenant, $leaseOption);
-                $selectedLeaseId = (int) $leaseOption['lease_id'];
-                $selectedLeaseFound = true;
-                break;
-            }
-        }
-        if (!$selectedLeaseFound && $selectedLeaseId > 0) {
-            $error = 'Select an active lease from your account before making a payment.';
-            $tenant['room_id'] = null;
-        }
-    }
 } catch (mysqli_sql_exception $exception) {
     error_log('Tenant payment profile query failed: ' . $exception->getMessage());
     $error = 'Your payment profile could not be loaded. Please contact management.';
@@ -142,9 +109,7 @@ if ($tenant && !empty($tenant['room_id'])) {
         $conn,
         (int) $tenant['tenant_id'],
         (float) $tenant['monthly_rate'],
-        $tenant['move_in_date'] ?: null,
-        null,
-        (int) $tenant['lease_id']
+        $tenant['move_in_date'] ?: null
     );
 }
 
@@ -160,7 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $proofFieldsAvailable) {
 
     if (!hash_equals($_SESSION['tenant_payments_csrf'], $postedToken)) {
         $error = 'Your session could not be verified. Refresh the page and try again.';
-    } elseif (!$tenant || empty($tenant['room_id']) || empty($tenant['lease_id']) || empty($tenant['branch_id']) || (float) $tenant['monthly_rate'] <= 0) {
+    } elseif (!$tenant || empty($tenant['room_id']) || empty($tenant['branch_id']) || (float) $tenant['monthly_rate'] <= 0) {
         $error = 'A room with a valid monthly rate must be assigned before submitting a payment.';
     } elseif (!$currentDue || (float) $currentDue['amount_due'] <= 0) {
         $error = 'There is no unpaid room-rent amount available for submission.';
@@ -222,15 +187,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $proofFieldsAvailable) {
                 $amountPaid = (float) $currentDue['amount_due'];
                 $paymentDate = date('Y-m-d');
                 $tenantId = (int) $tenant['tenant_id'];
-                $pendingStatus = 'Pending Verification';
+                $pendingStatus = 'Pending';
                 $stmt = $conn->prepare('
                     INSERT INTO payments
-                        (branch_id, tenant_id, lease_id, amount_paid, payment_date, payment_method, reference_number, proof_path, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
+                        (branch_id, tenant_id, amount_paid, payment_date, payment_method, reference_number, proof_path, status)
+                    VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
                 ');
                 $branchId = (int) $tenant['branch_id'];
-                $leaseId = (int) $tenant['lease_id'];
-                $stmt->bind_param('iiidssss', $branchId, $tenantId, $leaseId, $amountPaid, $paymentDate, $paymentMethod, $referenceNumber, $pendingStatus);
+                $stmt->bind_param('iidssss', $branchId, $tenantId, $amountPaid, $paymentDate, $paymentMethod, $referenceNumber, $pendingStatus);
                 $stmt->execute();
                 $paymentId = (int) $conn->insert_id;
                 $stmt->close();
@@ -278,14 +242,12 @@ if ($tenant && $proofFieldsAvailable) {
     $stmt = $conn->prepare('
         SELECT id, amount_paid, payment_date, payment_method, reference_number, proof_path, status
         FROM payments
-        WHERE tenant_id = ?
-          AND (? = 0 OR lease_id = ?)
-          AND (? = \'\' OR reference_number LIKE ?)
+        WHERE tenant_id = ? AND (? = \'\' OR reference_number LIKE ?)
         ORDER BY payment_date DESC, id DESC
         LIMIT 100
     ');
     $searchLike = '%' . $searchReference . '%';
-    $stmt->bind_param('iiiss', $tenantId, $selectedLeaseId, $selectedLeaseId, $searchReference, $searchLike);
+    $stmt->bind_param('iss', $tenantId, $searchReference, $searchLike);
     $stmt->execute();
     $payments = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
@@ -294,8 +256,8 @@ if ($tenant && $proofFieldsAvailable) {
 function paymentStatusPresentation(string $status): array
 {
     return match ($status) {
-        'Paid', 'Verified', 'Approved' => ['Verified & Paid', 'bg-[#bcedd6]/70 text-[#002116] border-[#a1d1bb]'],
-        'Pending', 'Pending Verification' => ['Pending Verification', 'bg-[#fff8e1] text-[#8a6500] border-[#ffe082]'],
+        'Paid', 'Verified' => ['Verified & Paid', 'bg-[#bcedd6]/70 text-[#002116] border-[#a1d1bb]'],
+        'Pending' => ['Pending Verification', 'bg-[#fff8e1] text-[#8a6500] border-[#ffe082]'],
         'Rejected', 'Overdue' => [$status, 'bg-[#ffdad6] text-[#93000a] border-[#eab4ae]'],
         default => [$status, 'bg-white/70 text-[#02353C] border-outline-variant/50'],
     };
@@ -852,22 +814,10 @@ if ($unreadStmt) {
 <?php if ($success !== ''): ?>
 <div class="rent-alert success" role="status"><?= e($success) ?></div>
 <?php endif; ?>
-<?php if ($leaseOptions): ?>
-<form class="rent-card" method="get" action="tenant_payments.php" style="margin-bottom:18px">
-    <label for="payment-lease">Choose rental</label>
-    <select id="payment-lease" name="lease_id" onchange="this.form.submit()">
-        <?php foreach ($leaseOptions as $leaseOption): ?>
-            <option value="<?= (int) $leaseOption['lease_id']; ?>" <?= $selectedLeaseId === (int) $leaseOption['lease_id'] ? 'selected' : ''; ?>>
-                <?= e($leaseOption['branch_name'] . ' · ' . $leaseOption['room_number']); ?> — ₱<?= number_format((float) $leaseOption['monthly_rate'], 2); ?>/month
-            </option>
-        <?php endforeach; ?>
-    </select>
-</form>
-<?php endif; ?>
 <?php if (!$tenant): ?>
 <div class="rent-alert" role="status">Your tenant record could not be found. Please contact management before making a payment.</div>
 <?php elseif (empty($tenant['room_id'])): ?>
-<div class="rent-alert" role="status">No active rental is currently assigned to your tenant account, so rent payment submission is unavailable.</div>
+<div class="rent-alert" role="status">No room is currently assigned to your tenant record, so rent payment submission is unavailable.</div>
 <?php endif; ?>
 <?php
 $dueDays = $currentDue ? (int) (new DateTimeImmutable('today'))->diff($currentDue['due_date'])->format('%r%a') : null;
@@ -936,8 +886,6 @@ $paymentMethodLabels['Bank Transfer'] = $bankLabel !== 'Bank transfer' ? 'Bank T
         </div>
         <form class="rent-form" action="tenant_payments.php#payment-submission" enctype="multipart/form-data" method="post" id="payment-submission">
             <input name="csrf_token" type="hidden" value="<?= e($_SESSION['tenant_payments_csrf']) ?>"/>
-            <input name="lease_id" type="hidden" value="<?= (int) $selectedLeaseId ?>"/>
-            <p>Rental: <?= $tenant && !empty($tenant['room_id']) ? e($tenant['branch_name'] . ' · ' . $tenant['room_number']) : 'No active rental'; ?></p>
             <div class="rent-field">
                 <label for="payment-method">Payment method used</label>
                 <select id="payment-method" name="payment_method" required>
@@ -961,7 +909,7 @@ $paymentMethodLabels['Bank Transfer'] = $bankLabel !== 'Bank transfer' ? 'Bank T
                 </label>
                 <input class="rent-file-input" id="proof-file" accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf" name="proof_file" required type="file"/>
             </div>
-            <button class="rent-submit" <?= !$tenant || empty($tenant['room_id']) || empty($tenant['lease_id']) || !$proofFieldsAvailable || !$currentDue || (float) $currentDue['amount_due'] <= 0 || $currentDue['has_pending_submission'] ? 'disabled' : '' ?> type="submit">
+            <button class="rent-submit" <?= !$tenant || empty($tenant['room_id']) || !$proofFieldsAvailable || !$currentDue || (float) $currentDue['amount_due'] <= 0 || $currentDue['has_pending_submission'] ? 'disabled' : '' ?> type="submit">
                 <span class="material-symbols-outlined" aria-hidden="true">send</span>Submit Payment
             </button>
             <p class="rent-detail-note">Your submission will remain pending until your landlord verifies it. Accepted files: JPG, PNG, WebP, or PDF, up to 10 MB.</p>

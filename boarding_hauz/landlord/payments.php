@@ -5,11 +5,11 @@ requireRole('landlord');
 $admin_title = 'Payment Management';
 $branchId = requireSelectedBranch();
 $adminId = currentBranchLandlordId();
-$paymentStatuses = ['Pending Verification', 'Approved', 'Rejected', 'Pending', 'Verified', 'Paid', 'Overdue'];
-$reviewStatuses = ['Approved', 'Rejected'];
+$paymentStatuses = ['Pending', 'Verified', 'Rejected', 'Paid', 'Overdue'];
+$reviewStatuses = ['Verified', 'Rejected'];
 $error = '';
 $successMessages = [
-    'reviewed' => 'Payment proof was reviewed successfully.',
+    'reviewed' => 'Payment status was updated successfully.',
     'channels_saved' => 'Your payment channel details were saved.',
 ];
 $successKey = is_string($_GET['success'] ?? null) ? $_GET['success'] : '';
@@ -123,93 +123,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($paymentId <= 0 || !in_array($newStatus, $reviewStatuses, true)) {
         $error = 'Select a valid payment and review status.';
     } else {
-        $transactionStarted = false;
         try {
-            $conn->begin_transaction();
-            $transactionStarted = true;
-            $stmt = $conn->prepare("
-                SELECT p.id, p.lease_id, p.tenant_id, p.status, l.id AS matching_lease_id
-                FROM payments p
-                LEFT JOIN tenant_leases l ON l.id = p.lease_id AND l.tenant_id = p.tenant_id
-                WHERE p.id = ? AND p.branch_id = ?
-                LIMIT 1 FOR UPDATE
-            ");
-            $stmt->bind_param('ii', $paymentId, $branchId);
-            $stmt->execute();
-            $existingPayment = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-
-            if (!$existingPayment) {
-                throw new RuntimeException('The selected payment could not be found.');
-            }
-            if (!in_array($existingPayment['status'], ['Pending Verification', 'Pending'], true)) {
-                throw new RuntimeException('Only payments awaiting verification can be reviewed.');
-            }
-            if (empty($existingPayment['matching_lease_id'])) {
-                throw new RuntimeException('This payment is not linked to a valid rental and cannot be approved.');
-            }
-
-            $oldStatus = (string) $existingPayment['status'];
             $stmt = $conn->prepare("
                 UPDATE payments
                 SET status = ?
-                WHERE id = ? AND branch_id = ? AND status = ?
+                WHERE id = ? AND status = 'Pending'
+                  AND branch_id = ?
+                  AND tenant_id IN (SELECT id FROM tenants WHERE branch_id = ?)
                 LIMIT 1
             ");
-            $stmt->bind_param('siis', $newStatus, $paymentId, $branchId, $oldStatus);
+            $stmt->bind_param('siii', $newStatus, $paymentId, $branchId, $branchId);
             $stmt->execute();
             $updated = $stmt->affected_rows === 1;
             $stmt->close();
+
             if (!$updated) {
-                throw new RuntimeException('The payment status changed before this review could be saved.');
-            }
-
-            if ($newStatus === 'Approved') {
-                $leaseId = (int) $existingPayment['lease_id'];
                 $stmt = $conn->prepare("
-                    UPDATE tenant_leases l
-                    INNER JOIN payments p ON p.lease_id = l.id AND p.tenant_id = l.tenant_id
-                    SET l.paid_until = DATE_SUB(
-                        DATE_ADD(
-                            GREATEST(
-                                COALESCE(l.paid_until, DATE_SUB(COALESCE(l.move_in_date, p.payment_date), INTERVAL 1 DAY)),
-                                p.payment_date
-                            ),
-                            INTERVAL 1 MONTH
-                        ),
-                        INTERVAL 1 DAY
-                    )
-                    WHERE p.id = ? AND p.lease_id = ?
+                    SELECT p.status
+                    FROM payments p
+                    INNER JOIN tenants t ON t.id = p.tenant_id AND t.branch_id = p.branch_id
+                    WHERE p.id = ? AND p.branch_id = ?
+                    LIMIT 1
                 ");
-                $stmt->bind_param('ii', $paymentId, $leaseId);
+                $stmt->bind_param('ii', $paymentId, $branchId);
                 $stmt->execute();
-                $paidUntilUpdated = $stmt->affected_rows === 1;
+                $existingPayment = $stmt->get_result()->fetch_assoc();
                 $stmt->close();
-                if (!$paidUntilUpdated) {
-                    throw new RuntimeException('The rental paid-through date could not be updated; payment approval was cancelled.');
+                if (!$existingPayment) {
+                    $error = 'The selected payment could not be found.';
+                } else {
+                    $error = 'Only pending payments can be reviewed. This payment is already ' . $existingPayment['status'] . '.';
                 }
+            } else {
+                $redirectParameters['success'] = 'reviewed';
+                $redirectUrl = '/boarding_hauz/landlord/payments.php';
+                if ($redirectParameters) {
+                    $redirectUrl .= '?' . http_build_query($redirectParameters);
+                }
+                header('Location: ' . $redirectUrl);
+                exit;
             }
-
-            $conn->commit();
-            $transactionStarted = false;
-            $redirectParameters['success'] = 'reviewed';
-            $redirectUrl = '/boarding_hauz/landlord/payments.php';
-            if ($redirectParameters) {
-                $redirectUrl .= '?' . http_build_query($redirectParameters);
-            }
-            header('Location: ' . $redirectUrl);
-            exit;
         } catch (mysqli_sql_exception $exception) {
-            if ($transactionStarted) {
-                $conn->rollback();
-            }
             error_log('Payment review update failed: ' . $exception->getMessage());
             $error = 'The payment status could not be updated. Please try again.';
-        } catch (RuntimeException $exception) {
-            if ($transactionStarted) {
-                $conn->rollback();
-            }
-            $error = $exception->getMessage();
         }
     }
     }
@@ -231,10 +187,11 @@ $channelSettings = [
 try {
     $summaryStmt = $conn->prepare("
         SELECT COUNT(*) AS total,
-            COALESCE(SUM(pay.status IN ('Pending Verification', 'Pending')), 0) AS pending,
-            COALESCE(SUM(pay.status IN ('Approved', 'Verified', 'Paid')), 0) AS verified,
+            COALESCE(SUM(pay.status = 'Pending'), 0) AS pending,
+            COALESCE(SUM(pay.status = 'Verified'), 0) AS verified,
             COALESCE(SUM(pay.status = 'Rejected'), 0) AS rejected
         FROM payments pay
+        INNER JOIN tenants t ON t.id = pay.tenant_id AND t.branch_id = pay.branch_id
         WHERE pay.branch_id = ?
     ");
     $summaryStmt->bind_param('i', $branchId);
@@ -256,14 +213,13 @@ try {
 
     $searchLike = '%' . $search . '%';
     $listStmt = $conn->prepare("
-        SELECT p.id, p.lease_id, p.amount_paid, p.payment_date, p.payment_method,
+        SELECT p.id, p.amount_paid, p.payment_date, p.payment_method,
                p.reference_number, p.proof_path, p.status,
-               t.full_name, l.room_id, u.username, r.room_number
+               t.full_name, t.room_id, u.username, r.room_number
         FROM payments p
-        LEFT JOIN tenants t ON t.id = p.tenant_id
-        LEFT JOIN tenant_leases l ON l.id = p.lease_id AND l.tenant_id = p.tenant_id
+        LEFT JOIN tenants t ON t.id = p.tenant_id AND t.branch_id = p.branch_id
         LEFT JOIN users u ON u.id = t.user_id
-        LEFT JOIN rooms r ON r.id = l.room_id AND r.branch_id = p.branch_id
+        LEFT JOIN rooms r ON r.id = t.room_id AND r.branch_id = p.branch_id
         WHERE p.branch_id = ?
           AND (? = '' OR t.full_name LIKE ? OR u.username LIKE ? OR r.room_number LIKE ?)
           AND (? = '' OR p.status = ?)
@@ -285,14 +241,13 @@ try {
 
     if ($viewId > 0) {
         $viewStmt = $conn->prepare("
-            SELECT p.id, p.lease_id, p.amount_paid, p.payment_date, p.payment_method,
+            SELECT p.id, p.amount_paid, p.payment_date, p.payment_method,
                    p.reference_number, p.proof_path, p.status,
-                   t.full_name, l.room_id, u.username, r.room_number
+                   t.full_name, t.room_id, u.username, r.room_number
             FROM payments p
-            LEFT JOIN tenants t ON t.id = p.tenant_id
-            LEFT JOIN tenant_leases l ON l.id = p.lease_id AND l.tenant_id = p.tenant_id
+            LEFT JOIN tenants t ON t.id = p.tenant_id AND t.branch_id = p.branch_id
             LEFT JOIN users u ON u.id = t.user_id
-            LEFT JOIN rooms r ON r.id = l.room_id AND r.branch_id = p.branch_id
+            LEFT JOIN rooms r ON r.id = t.room_id AND r.branch_id = p.branch_id
             WHERE p.id = ? AND p.branch_id = ?
             LIMIT 1
         ");
@@ -349,7 +304,7 @@ include __DIR__ . '/../admin/admin_header.php';
 <main class="payments-admin-page">
     <section class="payments-heading">
         <h1>Payment Management</h1>
-        <p>Review tenant-submitted payment proofs for this branch.</p>
+        <p>Review tenant-submitted payments and update pending payment statuses.</p>
     </section>
 
     <?php if ($success !== ''): ?><div class="payment-alert success"><?= e($success); ?></div><?php endif; ?>
@@ -393,7 +348,7 @@ include __DIR__ . '/../admin/admin_header.php';
     <section class="payment-summary" aria-label="Payment summary">
         <article class="payment-stat"><span>Total Payments</span><strong><?= (int) $summary['total']; ?></strong></article>
         <article class="payment-stat"><span>Pending Verification</span><strong><?= (int) $summary['pending']; ?></strong></article>
-        <article class="payment-stat"><span>Approved Payments</span><strong><?= (int) $summary['verified']; ?></strong></article>
+        <article class="payment-stat"><span>Verified Payments</span><strong><?= (int) $summary['verified']; ?></strong></article>
         <article class="payment-stat"><span>Rejected Payments</span><strong><?= (int) $summary['rejected']; ?></strong></article>
     </section>
 
@@ -463,14 +418,14 @@ include __DIR__ . '/../admin/admin_header.php';
                                 <td>
                                     <div class="payment-actions">
                                         <a class="payment-button secondary" href="payments.php?view=<?= (int) $payment['id']; ?>">View</a>
-                                        <?php if (in_array($payment['status'], ['Pending Verification', 'Pending'], true)): ?>
-                                            <form class="payment-review-form" method="post" action="payments.php" onsubmit="return confirm('Approve this payment proof?');">
+                                        <?php if ($payment['status'] === 'Pending'): ?>
+                                            <form class="payment-review-form" method="post" action="payments.php" onsubmit="return confirm('Verify this pending payment?');">
                                                 <input type="hidden" name="payment_id" value="<?= (int) $payment['id']; ?>">
-                                                <input type="hidden" name="status" value="Approved">
+                                                <input type="hidden" name="status" value="Verified">
                                                 <input type="hidden" name="csrf_token" value="<?= e($_SESSION['admin_payments_csrf']); ?>">
                                                 <input type="hidden" name="search" value="<?= e($search); ?>">
                                                 <input type="hidden" name="filter_status" value="<?= e($filterStatus); ?>">
-                                                <button class="payment-button" type="submit">Approve</button>
+                                                <button class="payment-button" type="submit">Verify</button>
                                             </form>
                                             <form class="payment-review-form" method="post" action="payments.php" onsubmit="return confirm('Reject this pending payment?');">
                                                 <input type="hidden" name="payment_id" value="<?= (int) $payment['id']; ?>">

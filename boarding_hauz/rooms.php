@@ -33,11 +33,10 @@ try {
               FROM rooms r
               WHERE r.branch_id = b.id
                 AND COALESCE(r.status, 'Available') <> 'Maintenance'
-                AND COALESCE(r.status, 'Available') NOT IN ('Occupied', 'Full')
                 AND r.capacity > (
                     SELECT COUNT(*)
-                  FROM tenant_leases l
-                  WHERE l.room_id = r.id AND l.status = 'active'
+                    FROM tenants t
+                    WHERE t.room_id = r.id AND t.status = 'active'
                 )
           )
         ORDER BY b.branch_name, b.id

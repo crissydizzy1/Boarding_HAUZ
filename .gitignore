@@ -1,1 +1,38 @@
-﻿.vscode/
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Machine-specific editor settings
+.vscode/
+.idea/
+
+# Dependencies and generated files
+/vendor/
+/node_modules/
+/cache/
+/tmp/
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Ignore future runtime uploads, but retain the current demo files supplied
+# with this repository. Add an explicit exception when adding another demo file.
+/boarding_hauz/uploads/rooms/*
+!/boarding_hauz/uploads/rooms/.htaccess
+!/boarding_hauz/uploads/rooms/room-10-z-1792678136.463110-3095af6e9b886eb0b4443618.jpg
+!/boarding_hauz/uploads/rooms/room-19-z-1792712465.672574-0f3b4622a53a8850e8441e44.jpg
+!/boarding_hauz/uploads/rooms/room-20-z-1792736123.367534-eeff96f388d41edd4c86ab5d.jpg
+!/boarding_hauz/uploads/rooms/room-2-z-1791091953.773827-85fc94740ad106082093b051.jpg
+!/boarding_hauz/uploads/rooms/room-5-z-1791194819.889548-b18fabc8283d329e4c1c0b4b.jpg
+!/boarding_hauz/uploads/rooms/room-6-z-1791205890.817216-13fe9b477d5c9b84feb63de0.jpg
+!/boarding_hauz/uploads/rooms/room-9-z-1792677093.880842-ba44da7b3a3bba197b6bde05.jpg
+
+/boarding_hauz/uploads/payment-proofs/*
+!/boarding_hauz/uploads/payment-proofs/.htaccess
+!/boarding_hauz/uploads/payment-proofs/payment-2-928bdebc4ab1ca6936c138b2a16b592e.svg
+
+# Runtime payment proof uploads
+/boarding_hauz/uploads/payment-proofs/*
+!/boarding_hauz/uploads/payment-proofs/.htaccess

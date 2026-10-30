@@ -46,28 +46,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         try {
             $conn->begin_transaction();
-            $stmt = $conn->prepare("
-                SELECT t.id
-                FROM tenants t
-                WHERE t.id = ?
-                  AND (t.branch_id = ? OR EXISTS (
-                      SELECT 1
-                      FROM tenant_leases l
-                      INNER JOIN rooms r ON r.id = l.room_id
-                      WHERE l.tenant_id = t.id AND r.branch_id = ?
-                  ))
-                LIMIT 1 FOR UPDATE
-            ");
-            $stmt->bind_param('iii', $tenantId, $branchId, $branchId);
+            $stmt = $conn->prepare('SELECT id, room_id FROM tenants WHERE id = ? AND branch_id = ? LIMIT 1');
+            $stmt->bind_param('ii', $tenantId, $branchId);
             $stmt->execute();
             $tenantToUpdate = $stmt->get_result()->fetch_assoc();
             $stmt->close();
             if (!$tenantToUpdate) {
-                throw new RuntimeException('The selected tenant could not be found for this branch.');
+                throw new RuntimeException('The selected tenant could not be found.');
             }
+
+            $previousRoomId = $tenantToUpdate['room_id'] === null ? null : (int) $tenantToUpdate['room_id'];
+            if ($previousRoomId !== null) {
+                $stmt = $conn->prepare('SELECT id FROM rooms WHERE id = ? AND branch_id = ? LIMIT 1 FOR UPDATE');
+                $stmt->bind_param('ii', $previousRoomId, $branchId);
+                $stmt->execute();
+                $lockedRoom = (bool) $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                if (!$lockedRoom) {
+                    throw new RuntimeException('The tenant room assignment could not be verified.');
+                }
+            }
+
+            $stmt = $conn->prepare('SELECT id, room_id FROM tenants WHERE id = ? AND branch_id = ? LIMIT 1 FOR UPDATE');
+            $stmt->bind_param('ii', $tenantId, $branchId);
+            $stmt->execute();
+            $tenantToUpdate = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if (!$tenantToUpdate || ($tenantToUpdate['room_id'] === null ? null : (int) $tenantToUpdate['room_id']) !== $previousRoomId) {
+                throw new RuntimeException('The tenant room assignment changed. Refresh and try again.');
+            }
+
             $contactNumber = $editValues['contact_number'] === '' ? null : $editValues['contact_number'];
-            $stmt = $conn->prepare('UPDATE tenants SET full_name = ?, contact_number = ?, status = ? WHERE id = ? LIMIT 1');
-            $stmt->bind_param('sssi', $editValues['full_name'], $contactNumber, $editValues['status'], $tenantId);
+            if ($editValues['status'] !== 'active' && $tenantToUpdate['room_id'] !== null) {
+                $stmt = $conn->prepare('UPDATE tenants SET full_name = ?, contact_number = ?, status = ?, room_id = NULL WHERE id = ? AND branch_id = ? LIMIT 1');
+                $stmt->bind_param('sssii', $editValues['full_name'], $contactNumber, $editValues['status'], $tenantId, $branchId);
+            } else {
+                $stmt = $conn->prepare('UPDATE tenants SET full_name = ?, contact_number = ?, status = ? WHERE id = ? AND branch_id = ? LIMIT 1');
+                $stmt->bind_param('sssii', $editValues['full_name'], $contactNumber, $editValues['status'], $tenantId, $branchId);
+            }
             $stmt->execute();
             $stmt->close();
             $conn->commit();
@@ -104,38 +120,28 @@ if (!in_array($roomFilter, ['assigned', 'unassigned'], true)) {
 
 $tenantCounts = ['total' => 0, 'active' => 0, 'pending' => 0, 'unassigned' => 0];
 $stmt = $conn->prepare("
-    SELECT COUNT(DISTINCT t.id) AS total,
-        COUNT(DISTINCT CASE WHEN t.status = 'active' THEN t.id END) AS active,
-        COUNT(DISTINCT CASE WHEN t.status = 'pending' THEN t.id END) AS pending,
-        COUNT(DISTINCT CASE WHEN t.status = 'active' AND r.id IS NULL THEN t.id END) AS unassigned
-    FROM tenants t
-    LEFT JOIN tenant_leases l ON l.tenant_id = t.id AND l.status = 'active'
-    LEFT JOIN rooms r ON r.id = l.room_id AND r.branch_id = ?
-    WHERE t.branch_id = ? OR r.id IS NOT NULL
+    SELECT COUNT(*) AS total,
+        COALESCE(SUM(status = 'active'), 0) AS active,
+        COALESCE(SUM(status = 'pending'), 0) AS pending,
+        COALESCE(SUM(room_id IS NULL), 0) AS unassigned
+    FROM tenants
+    WHERE branch_id = ?
 ");
-$stmt->bind_param('ii', $branchId, $branchId);
+$stmt->bind_param('i', $branchId);
 $stmt->execute();
 $tenantCounts = $stmt->get_result()->fetch_assoc() ?: $tenantCounts;
 $stmt->close();
 
 $tenantSql = "
-    SELECT t.id, t.full_name, t.contact_number,
-        MIN(CASE WHEN l.id IS NOT NULL THEN l.room_id END) AS room_id,
-        MAX(l.move_in_date) AS move_in_date,
-        COUNT(DISTINCT l.id) AS branch_lease_count,
-        GROUP_CONCAT(DISTINCT r.room_number ORDER BY r.room_number SEPARATOR ', ') AS room_number,
-        GROUP_CONCAT(DISTINCT r.room_type ORDER BY r.room_type SEPARATOR ', ') AS room_type,
-        MAX(l.monthly_rate) AS monthly_rate,
-        MAX(r.capacity) AS capacity,
-        MAX(r.status) AS room_status,
+    SELECT t.id, t.full_name, t.contact_number, t.room_id, t.move_in_date,
         t.status AS tenant_status, t.created_at,
-        u.email
+        u.email,
+        r.room_number, r.room_type, r.monthly_rate, r.capacity, r.status AS room_status
     FROM tenants t
     LEFT JOIN users u ON u.id = t.user_id
-    LEFT JOIN tenant_leases l ON l.tenant_id = t.id AND l.status = 'active'
-    LEFT JOIN rooms r ON r.id = l.room_id AND r.branch_id = ?
+    LEFT JOIN rooms r ON r.id = t.room_id AND r.branch_id = t.branch_id
 ";
-$conditions = ['(t.branch_id = ? OR r.id IS NOT NULL)'];
+$conditions = ['t.branch_id = ?'];
 if ($search !== '') {
     $conditions[] = '(t.full_name LIKE ? OR t.contact_number LIKE ? OR r.room_number LIKE ? OR u.email LIKE ?)';
 }
@@ -143,25 +149,25 @@ if ($filterStatus !== '') {
     $conditions[] = 't.status = ?';
 }
 if ($roomFilter === 'assigned') {
-    $conditions[] = 'r.id IS NOT NULL';
+    $conditions[] = 't.room_id IS NOT NULL';
 } elseif ($roomFilter === 'unassigned') {
-    $conditions[] = 'r.id IS NULL';
+    $conditions[] = 't.room_id IS NULL';
 }
 if ($conditions) {
     $tenantSql .= ' WHERE ' . implode(' AND ', $conditions);
 }
-$tenantSql .= ' GROUP BY t.id ORDER BY t.full_name, t.id';
+$tenantSql .= ' ORDER BY t.full_name, t.id';
 
 $stmt = $conn->prepare($tenantSql);
 $bindTypes = '';
 $bindValues = [];
 if ($search !== '' && $filterStatus !== '') {
     $searchPattern = '%' . $search . '%';
-    $bindTypes .= 'iisssss';
-    array_push($bindValues, $branchId, $branchId, $searchPattern, $searchPattern, $searchPattern, $searchPattern, $filterStatus);
+    $bindTypes .= 'isssss';
+    array_push($bindValues, $branchId, $searchPattern, $searchPattern, $searchPattern, $searchPattern, $filterStatus);
 } else {
-    $bindTypes .= 'ii';
-    array_push($bindValues, $branchId, $branchId);
+    $bindTypes .= 'i';
+    $bindValues[] = $branchId;
     if ($search !== '') {
         $searchPattern = '%' . $search . '%';
         $bindTypes .= 'ssss';
@@ -192,19 +198,8 @@ $stmt->close();
 
 $editTenant = null;
 if ($editId > 0) {
-    $stmt = $conn->prepare("
-        SELECT t.id, t.full_name, t.contact_number, t.status
-        FROM tenants t
-        WHERE t.id = ?
-          AND (t.branch_id = ? OR EXISTS (
-              SELECT 1
-              FROM tenant_leases l
-              INNER JOIN rooms r ON r.id = l.room_id
-              WHERE l.tenant_id = t.id AND r.branch_id = ?
-          ))
-        LIMIT 1
-    ");
-    $stmt->bind_param('iii', $editId, $branchId, $branchId);
+    $stmt = $conn->prepare('SELECT id, full_name, contact_number, status FROM tenants WHERE id = ? AND branch_id = ? LIMIT 1');
+    $stmt->bind_param('ii', $editId, $branchId);
     $stmt->execute();
     $editTenant = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -220,23 +215,15 @@ if ($editId > 0) {
 $viewTenant = null;
 if ($viewId > 0) {
     $stmt = $conn->prepare("
-        SELECT t.id, t.full_name, t.contact_number,
-            MIN(CASE WHEN l.id IS NOT NULL THEN l.room_id END) AS room_id,
-            MAX(l.move_in_date) AS move_in_date,
-            COUNT(DISTINCT l.id) AS branch_lease_count,
-            GROUP_CONCAT(DISTINCT r.room_number ORDER BY r.room_number SEPARATOR ', ') AS room_number,
-            GROUP_CONCAT(DISTINCT r.room_type ORDER BY r.room_type SEPARATOR ', ') AS room_type,
-            MAX(l.monthly_rate) AS monthly_rate, MAX(r.capacity) AS capacity, MAX(r.status) AS room_status,
-            t.status AS tenant_status, t.created_at, u.email
+        SELECT t.id, t.full_name, t.contact_number, t.room_id, t.move_in_date, t.status AS tenant_status, t.created_at,
+            u.email, r.room_number, r.room_type, r.monthly_rate, r.capacity, r.status AS room_status
         FROM tenants t
         LEFT JOIN users u ON u.id = t.user_id
-        LEFT JOIN tenant_leases l ON l.tenant_id = t.id AND l.status = 'active'
-        LEFT JOIN rooms r ON r.id = l.room_id AND r.branch_id = ?
-        WHERE t.id = ? AND (t.branch_id = ? OR r.id IS NOT NULL)
-        GROUP BY t.id
+        LEFT JOIN rooms r ON r.id = t.room_id AND r.branch_id = t.branch_id
+        WHERE t.id = ? AND t.branch_id = ?
         LIMIT 1
     ");
-    $stmt->bind_param('iii', $branchId, $viewId, $branchId);
+    $stmt->bind_param('ii', $viewId, $branchId);
     $stmt->execute();
     $viewTenant = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -319,7 +306,7 @@ if ($viewId > 0) {
         <section class="tenant-panel" aria-labelledby="edit-tenant-heading">
             <?php if ($editTenant): ?>
                 <h2 id="edit-tenant-heading">Edit Tenant Details</h2>
-                <p class="tenant-intro">Update this tenant account profile. Changing account status does not end active leases; rental occupancy is managed separately.</p>
+                <p class="tenant-intro">Update tenant details and rental status. Setting a tenant to Rejected removes their room assignment.</p>
                 <form method="post" class="tenant-form">
                     <input type="hidden" name="csrf_token" value="<?= e($_SESSION['admin_tenants_csrf']); ?>">
                     <input type="hidden" name="action" value="update_tenant">
@@ -403,7 +390,7 @@ if ($viewId > 0) {
                                 <td><span class="tenant-name"><?= e($tenant['full_name']); ?></span><span class="tenant-subtext"><?= e($tenant['email'] ?: 'No email on record'); ?></span></td>
                                 <td>
                                     <?php if ($tenant['room_id'] !== null): ?>
-                                        <?= e($tenant['room_number'] ?: 'Room unavailable'); ?><span class="tenant-subtext"><?= (int) $tenant['branch_lease_count']; ?> active room(s) in this branch · <?= e($tenant['room_type'] ?: ''); ?></span>
+                                        Room <?= e($tenant['room_number'] ?: 'Unknown'); ?><span class="tenant-subtext"><?= e($tenant['room_type'] ?: ''); ?></span>
                                     <?php else: ?>
                                         Unassigned
                                     <?php endif; ?>

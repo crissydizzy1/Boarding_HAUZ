@@ -5,7 +5,7 @@ requireRole('landlord');
 
 $admin_title = 'Dashboard';
 $user = currentUser();
-$branchId = requireSelectedBranch();
+$branchId = currentBranchId();
 
 $adminName = $user['username'] ?? $_SESSION['user_name'] ?? 'Admin';
 $totalRooms = 0;
@@ -23,8 +23,8 @@ $unreadPublicInquiries = 0;
 $recentPublicInquiries = [];
 $hasPublicInquiriesTable = true;
 
-$stmt = $conn->prepare('SELECT id, capacity, status FROM rooms WHERE branch_id = ?');
-$stmt->bind_param('i', $branchId);
+$stmt = $conn->prepare('SELECT id, capacity, status FROM rooms WHERE (? IS NULL OR branch_id = ?)');
+$stmt->bind_param('ii', $branchId, $branchId);
 $stmt->execute();
 $rooms = attachRoomOccupancy($conn, $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
 $stmt->close();
@@ -40,20 +40,14 @@ foreach ($rooms as $room) {
     }
 }
 
-$stmt = $conn->prepare("
-    SELECT COUNT(DISTINCT t.id) AS total
-    FROM tenants t
-    LEFT JOIN tenant_leases l ON l.tenant_id = t.id AND l.status = 'active'
-    LEFT JOIN rooms r ON r.id = l.room_id
-    WHERE t.branch_id = ? OR r.branch_id = ?
-");
+$stmt = $conn->prepare("SELECT COUNT(*) AS total FROM tenants WHERE (? IS NULL OR branch_id = ?)");
 $stmt->bind_param('ii', $branchId, $branchId);
 $stmt->execute();
 $totalTenants = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
 $stmt->close();
 
-$stmt = $conn->prepare("SELECT COUNT(*) AS total FROM payments WHERE status IN ('Pending Verification', 'Pending') AND branch_id = ?");
-$stmt->bind_param('i', $branchId);
+$stmt = $conn->prepare("SELECT COUNT(*) AS total FROM payments WHERE status = 'Pending' AND (? IS NULL OR branch_id = ?)");
+$stmt->bind_param('ii', $branchId, $branchId);
 $stmt->execute();
 $pendingPayments = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
 $stmt->close();
@@ -66,8 +60,8 @@ $hasMaintenanceTable = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0) 
 $stmt->close();
 
 if ($hasMaintenanceTable) {
-    $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM maintenance_requests WHERE status = 'Pending' AND branch_id = ?");
-    $stmt->bind_param('i', $branchId);
+    $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM maintenance_requests WHERE status = 'Pending' AND (? IS NULL OR branch_id = ?)");
+    $stmt->bind_param('ii', $branchId, $branchId);
     $stmt->execute();
     $pendingMaintenance = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
     $stmt->close();
@@ -81,16 +75,16 @@ $hasRoomRequestsTable = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0)
 $stmt->close();
 
 if ($hasRoomRequestsTable) {
-    $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM room_requests rr INNER JOIN rooms r ON r.id = rr.room_id WHERE rr.status = 'Pending' AND r.branch_id = ?");
-    $stmt->bind_param('i', $branchId);
+    $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM room_requests rr INNER JOIN rooms r ON r.id = rr.room_id WHERE rr.status = 'Pending' AND (? IS NULL OR r.branch_id = ?)");
+    $stmt->bind_param('ii', $branchId, $branchId);
     $stmt->execute();
     $pendingRoomApplications = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
     $stmt->close();
 }
 
 try {
-    $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM public_inquiries WHERE status = 'Unread' AND branch_id = ?");
-    $stmt->bind_param('i', $branchId);
+    $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM public_inquiries WHERE status = 'Unread' AND (? IS NULL OR branch_id = ?)");
+    $stmt->bind_param('ii', $branchId, $branchId);
     $stmt->execute();
     $unreadPublicInquiries = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
     $stmt->close();
@@ -98,11 +92,11 @@ try {
     $stmt = $conn->prepare("
         SELECT id, full_name, email, contact_number, preferred_room_type, status, created_at
         FROM public_inquiries
-        WHERE branch_id = ?
+        WHERE (? IS NULL OR branch_id = ?)
         ORDER BY created_at DESC, id DESC
         LIMIT 5
     ");
-    $stmt->bind_param('i', $branchId);
+    $stmt->bind_param('ii', $branchId, $branchId);
     $stmt->execute();
     $recentPublicInquiries = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();

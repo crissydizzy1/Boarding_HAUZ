@@ -222,14 +222,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $reviewedBy = (int) $_SESSION['user_id'];
 
                 if ($postedAction === 'reject_room_request') {
-                    $stmt = $conn->prepare('SELECT id FROM tenants WHERE id = ? LIMIT 1 FOR UPDATE');
-                    $stmt->bind_param('i', $tenantId);
+                    $stmt = $conn->prepare('SELECT room_id, branch_id FROM tenants WHERE id = ? AND (branch_id IS NULL OR branch_id = ?) LIMIT 1 FOR UPDATE');
+                    $stmt->bind_param('ii', $tenantId, $branchId);
                     $stmt->execute();
                     $applicant = $stmt->get_result()->fetch_assoc();
                     $stmt->close();
                     if (!$applicant) {
                         throw new RuntimeException('The applicant record no longer exists.');
                     }
+                    if ($applicant['room_id'] !== null) {
+                        throw new RuntimeException('An applicant with an assigned room cannot be rejected. Review the room assignment first.');
+                    }
+
+                    $stmt = $conn->prepare("UPDATE tenants SET status = 'rejected' WHERE id = ? AND room_id IS NULL LIMIT 1");
+                    $stmt->bind_param('i', $tenantId);
+                    $stmt->execute();
+                    $stmt->close();
 
                     $stmt = $conn->prepare("
                         UPDATE room_requests
@@ -250,7 +258,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit;
                 }
 
-                $stmt = $conn->prepare('SELECT status, capacity, monthly_rate, admin_id, branch_id FROM rooms WHERE id = ? AND branch_id = ? LIMIT 1 FOR UPDATE');
+                $stmt = $conn->prepare('SELECT status, capacity, admin_id, branch_id FROM rooms WHERE id = ? AND branch_id = ? LIMIT 1 FOR UPDATE');
                 $stmt->bind_param('ii', $roomId, $branchId);
                 $stmt->execute();
                 $requestedRoom = $stmt->get_result()->fetch_assoc();
@@ -262,19 +270,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('The requested room is no longer available.');
                 }
 
-                $stmt = $conn->prepare('SELECT status FROM tenants WHERE id = ? LIMIT 1 FOR UPDATE');
-                $stmt->bind_param('i', $tenantId);
+                $stmt = $conn->prepare('SELECT status, room_id, branch_id FROM tenants WHERE id = ? AND (branch_id IS NULL OR branch_id = ?) LIMIT 1 FOR UPDATE');
+                $stmt->bind_param('ii', $tenantId, $branchId);
                 $stmt->execute();
                 $applicant = $stmt->get_result()->fetch_assoc();
                 $stmt->close();
                 if (!$applicant) {
                     throw new RuntimeException('The applicant record no longer exists.');
                 }
+                if ($applicant['room_id'] !== null) {
+                    throw new RuntimeException('The applicant already has an assigned room.');
+                }
                 if (in_array($applicant['status'], ['rejected', 'inactive'], true)) {
                     throw new RuntimeException('This applicant is not eligible for room assignment.');
                 }
 
-                $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM tenant_leases WHERE room_id = ? AND status = 'active'");
+                $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM tenants WHERE room_id = ? AND status = 'active'");
                 $stmt->bind_param('i', $roomId);
                 $stmt->execute();
                 $currentOccupants = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
@@ -282,31 +293,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($currentOccupants >= (int) $requestedRoom['capacity']) {
                     throw new RuntimeException('This room is already at full capacity. No available slots remain.');
                 }
-                if (in_array($requestedRoom['status'], ['Occupied', 'Full'], true)) {
-                    throw new RuntimeException('This room is not accepting tenants.');
-                }
 
-                $monthlyRate = (float) $requestedRoom['monthly_rate'];
-                $moveInDate = date('Y-m-d');
-                $stmt = $conn->prepare("
-                    INSERT INTO tenant_leases (tenant_id, room_id, monthly_rate, move_in_date, status)
-                    VALUES (?, ?, ?, ?, 'active')
-                ");
-                $stmt->bind_param('iids', $tenantId, $roomId, $monthlyRate, $moveInDate);
+                $roomAdminId = (int) $requestedRoom['admin_id'];
+                $roomBranchId = (int) $requestedRoom['branch_id'];
+                $stmt = $conn->prepare("UPDATE tenants SET room_id = ?, admin_id = ?, branch_id = ?, status = 'active' WHERE id = ? AND room_id IS NULL AND (branch_id IS NULL OR branch_id = ?) LIMIT 1");
+                $stmt->bind_param('iiiii', $roomId, $roomAdminId, $roomBranchId, $tenantId, $branchId);
                 $stmt->execute();
-                $leaseId = (int) $conn->insert_id;
+                $tenantAssigned = $stmt->affected_rows === 1;
                 $stmt->close();
-                if ($leaseId <= 0) {
-                    throw new RuntimeException('The tenant lease could not be created.');
+                if (!$tenantAssigned) {
+                    throw new RuntimeException('The applicant could not be assigned to the requested room.');
                 }
 
                 $stmt = $conn->prepare("
                     UPDATE room_requests
-                    SET status = 'Approved', lease_id = ?, reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ?
+                    SET status = 'Approved', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ?
                     WHERE id = ? AND status = 'Pending'
                     LIMIT 1
                 ");
-                $stmt->bind_param('iii', $leaseId, $reviewedBy, $requestReviewId);
+                $stmt->bind_param('ii', $reviewedBy, $requestReviewId);
                 $stmt->execute();
                 $requestApproved = $stmt->affected_rows === 1;
                 $stmt->close();
@@ -314,7 +319,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('The application status changed before approval could be saved.');
                 }
 
-                synchronizeRoomAvailability($conn, $roomId);
                 $conn->commit();
                 header('Location: /boarding_hauz/landlord/rooms.php?success=request_approved#room-applications');
                 exit;
@@ -402,7 +406,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 throw new RuntimeException('The selected room could not be found.');
                             }
 
-                            $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM tenant_leases WHERE room_id = ? AND status = 'active'");
+                            $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM tenants WHERE room_id = ? AND status = 'active'");
                             $stmt->bind_param('i', $roomId);
                             $stmt->execute();
                             $currentOccupants = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
@@ -428,7 +432,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $stmt->execute();
                             $stmt->close();
                         }
-                        synchronizeRoomAvailability($conn, $roomId);
                         $conn->commit();
                         $imageCleanupSucceeded = true;
                         if ($imageUpload !== null || $selectedRoomImage !== '') {
@@ -487,7 +490,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new RuntimeException('The selected room could not be found.');
                     }
 
-                    $stmt = $conn->prepare('SELECT id FROM tenant_leases WHERE room_id = ? LIMIT 1');
+                    $stmt = $conn->prepare('SELECT id FROM tenants WHERE room_id = ? LIMIT 1');
                     $stmt->bind_param('i', $roomId);
                     $stmt->execute();
                     $hasTenant = (bool) $stmt->get_result()->fetch_assoc();
@@ -538,7 +541,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $conn->begin_transaction();
             try {
-                $stmt = $conn->prepare('SELECT id, status, capacity, monthly_rate, admin_id, branch_id FROM rooms WHERE id = ? AND branch_id = ? LIMIT 1 FOR UPDATE');
+                $stmt = $conn->prepare('SELECT id, status, capacity, admin_id, branch_id FROM rooms WHERE id = ? AND branch_id = ? LIMIT 1 FOR UPDATE');
                 $stmt->bind_param('ii', $roomId, $branchId);
                 $stmt->execute();
                 $roomRecord = $stmt->get_result()->fetch_assoc();
@@ -546,11 +549,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$roomRecord) {
                     throw new RuntimeException('The selected room could not be found.');
                 }
-                if (in_array($roomRecord['status'], ['Maintenance', 'Occupied', 'Full'], true)) {
-                    throw new RuntimeException('This room is not accepting tenants.');
+                if ($roomRecord['status'] === 'Maintenance') {
+                    throw new RuntimeException('A room under maintenance cannot receive a tenant.');
                 }
 
-                $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM tenant_leases WHERE room_id = ? AND status = 'active'");
+                $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM tenants WHERE room_id = ? AND status = 'active'");
                 $stmt->bind_param('i', $roomId);
                 $stmt->execute();
                 $currentOccupants = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
@@ -559,55 +562,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('This room is already at full capacity. No available slots remain.');
                 }
 
-                $stmt = $conn->prepare('SELECT id, status, branch_id FROM tenants WHERE id = ? LIMIT 1 FOR UPDATE');
-                $stmt->bind_param('i', $tenantId);
+                $stmt = $conn->prepare('SELECT id, room_id, status, branch_id FROM tenants WHERE id = ? AND branch_id = ? LIMIT 1 FOR UPDATE');
+                $stmt->bind_param('ii', $tenantId, $branchId);
                 $stmt->execute();
                 $tenantRecord = $stmt->get_result()->fetch_assoc();
                 $stmt->close();
-                if (!$tenantRecord || $tenantRecord['status'] !== 'active') {
-                    throw new RuntimeException('Only an active tenant can be assigned to a room.');
+                if (!$tenantRecord || $tenantRecord['status'] !== 'active' || $tenantRecord['room_id'] !== null) {
+                    throw new RuntimeException('Only an active, unassigned tenant can be assigned to a room.');
                 }
-                if ((int) ($tenantRecord['branch_id'] ?? 0) !== $branchId) {
-                    $stmt = $conn->prepare("
-                        SELECT EXISTS (
-                            SELECT 1
-                            FROM tenant_leases l
-                            INNER JOIN rooms r ON r.id = l.room_id
-                            WHERE l.tenant_id = ? AND r.branch_id = ? AND l.status = 'active'
-                        ) OR EXISTS (
-                            SELECT 1
-                            FROM room_requests rr
-                            INNER JOIN rooms r ON r.id = rr.room_id
-                            WHERE rr.tenant_id = ? AND r.branch_id = ? AND rr.status = 'Pending'
-                        ) AS branch_relationship
-                    ");
-                    $stmt->bind_param('iiii', $tenantId, $branchId, $tenantId, $branchId);
-                    $stmt->execute();
-                    $hasBranchRelationship = (bool) ($stmt->get_result()->fetch_assoc()['branch_relationship'] ?? false);
-                    $stmt->close();
-                    if (!$hasBranchRelationship) {
-                        throw new RuntimeException('This tenant is not associated with your branch.');
-                    }
-                }
-                $stmt = $conn->prepare("SELECT id FROM tenant_leases WHERE tenant_id = ? AND room_id = ? AND status = 'active' LIMIT 1");
-                $stmt->bind_param('ii', $tenantId, $roomId);
+                $roomAdminId = (int) $roomRecord['admin_id'];
+                $roomBranchId = (int) $roomRecord['branch_id'];
+                $stmt = $conn->prepare('UPDATE tenants SET room_id = ?, admin_id = ?, branch_id = ? WHERE id = ? AND room_id IS NULL AND branch_id = ? LIMIT 1');
+                $stmt->bind_param('iiiii', $roomId, $roomAdminId, $roomBranchId, $tenantId, $branchId);
                 $stmt->execute();
-                $alreadyLeased = (bool) $stmt->get_result()->fetch_assoc();
+                $updatedTenant = $stmt->affected_rows === 1;
                 $stmt->close();
-                if ($alreadyLeased) {
-                    throw new RuntimeException('This tenant already has an active lease for the selected room.');
+                if (!$updatedTenant) {
+                    throw new RuntimeException('The tenant could not be assigned. Refresh and try again.');
                 }
 
-                $monthlyRate = (float) $roomRecord['monthly_rate'];
-                $moveInDate = date('Y-m-d');
-                $stmt = $conn->prepare("
-                    INSERT INTO tenant_leases (tenant_id, room_id, monthly_rate, move_in_date, status)
-                    VALUES (?, ?, ?, ?, 'active')
-                ");
-                $stmt->bind_param('iids', $tenantId, $roomId, $monthlyRate, $moveInDate);
-                $stmt->execute();
-                $stmt->close();
-                synchronizeRoomAvailability($conn, $roomId);
                 $conn->commit();
                 header('Location: /boarding_hauz/landlord/rooms.php?success=assigned');
                 exit;
@@ -699,7 +672,7 @@ try {
         LEFT JOIN users u ON u.id = t.user_id
         INNER JOIN rooms r ON r.id = rr.room_id
         LEFT JOIN branches b ON b.id = r.branch_id
-        WHERE r.branch_id = ?
+        WHERE r.branch_id = ? AND (t.branch_id IS NULL OR t.branch_id = r.branch_id)
         ORDER BY CASE WHEN rr.status = 'Pending' THEN 0 ELSE 1 END,
                  rr.created_at DESC,
                  rr.id DESC
@@ -730,11 +703,9 @@ $roomSql = "
     SELECT r.id, r.room_number, r.room_type, r.capacity, r.monthly_rate, r.status, r.image_path,
         b.branch_name,
         (SELECT GROUP_CONCAT(ta.full_name ORDER BY ta.full_name SEPARATOR ', ')
-            FROM tenant_leases tl
-            INNER JOIN tenants ta ON ta.id = tl.tenant_id
-            WHERE tl.room_id = r.id AND tl.status = 'active') AS active_tenant_names,
+            FROM tenants ta WHERE ta.room_id = r.id AND ta.status = 'active') AS active_tenant_names,
         (SELECT COUNT(*) FROM room_requests rq WHERE rq.room_id = r.id AND rq.status = 'Pending') AS pending_request_count,
-        EXISTS(SELECT 1 FROM tenant_leases tl WHERE tl.room_id = r.id) AS has_tenant,
+        EXISTS(SELECT 1 FROM tenants ta WHERE ta.room_id = r.id) AS has_tenant,
         EXISTS(SELECT 1 FROM maintenance_requests mr WHERE mr.room_id = r.id AND mr.branch_id = r.branch_id) AS has_maintenance_history
     FROM rooms r
     LEFT JOIN branches b ON b.id = r.branch_id
@@ -782,28 +753,8 @@ if ($assignRoomId > 0) {
     if ($assignRoom) {
         $assignRoom = attachRoomOccupancy($conn, [$assignRoom])[0];
         if ($assignRoom['accepts_tenants']) {
-            $stmt = $conn->prepare("
-                SELECT t.id, t.full_name, t.contact_number
-                FROM tenants t
-                WHERE t.status = 'active'
-                  AND (
-                      t.branch_id = ?
-                      OR EXISTS (
-                          SELECT 1
-                          FROM tenant_leases l
-                          INNER JOIN rooms r ON r.id = l.room_id
-                          WHERE l.tenant_id = t.id AND r.branch_id = ? AND l.status = 'active'
-                      )
-                      OR EXISTS (
-                          SELECT 1
-                          FROM room_requests rr
-                          INNER JOIN rooms r ON r.id = rr.room_id
-                          WHERE rr.tenant_id = t.id AND r.branch_id = ? AND rr.status = 'Pending'
-                      )
-                  )
-                ORDER BY t.full_name
-            ");
-            $stmt->bind_param('iii', $branchId, $branchId, $branchId);
+            $stmt = $conn->prepare("SELECT id, full_name, contact_number FROM tenants WHERE status = 'active' AND room_id IS NULL AND branch_id = ? ORDER BY full_name");
+            $stmt->bind_param('i', $branchId);
             $stmt->execute();
             $result = $stmt->get_result();
             while ($row = $result->fetch_assoc()) {

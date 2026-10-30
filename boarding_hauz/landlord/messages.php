@@ -116,16 +116,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     INNER JOIN tenants t ON t.user_id = u.id
                     WHERE u.id = ?
                       AND u.role = 'tenant'
-                      AND (t.branch_id = ? OR EXISTS (
-                          SELECT 1
-                          FROM tenant_leases l
-                          INNER JOIN rooms r ON r.id = l.room_id
-                          WHERE l.tenant_id = t.id AND r.branch_id = ?
-                      ))
+                      AND t.branch_id = ?
                     LIMIT 1
                 ");
 
-                $stmt->bind_param('iii', $receiverId, $branchId, $branchId);
+                $stmt->bind_param('ii', $receiverId, $branchId);
 
                 $stmt->execute();
 
@@ -223,7 +218,8 @@ try {
             u.username,
             u.email,
             t.full_name,
-            GROUP_CONCAT(DISTINCT r.room_number ORDER BY r.room_number SEPARATOR ', ') AS room_number,
+            t.room_id,
+            r.room_number,
 
             (
                 SELECT COUNT(*)
@@ -238,17 +234,14 @@ try {
         INNER JOIN tenants t
             ON t.user_id = u.id
 
-        LEFT JOIN tenant_leases l
-            ON l.tenant_id = t.id AND l.status = 'active'
         LEFT JOIN rooms r
-            ON r.id = l.room_id AND r.branch_id = ?
+            ON r.id = t.room_id
         WHERE u.role = 'tenant'
-          AND (t.branch_id = ? OR r.id IS NOT NULL)
-        GROUP BY t.id
+          AND t.branch_id = ?
         ORDER BY t.full_name ASC
     ");
 
-    $stmt->bind_param('iii', $adminId, $branchId, $branchId);
+    $stmt->bind_param('ii', $adminId, $branchId);
 
     $stmt->execute();
 

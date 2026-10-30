@@ -41,7 +41,6 @@ try {
         SELECT b.id, b.branch_name, b.location,
             COUNT(DISTINCT CASE
                 WHEN COALESCE(r.status, 'Available') <> 'Maintenance'
-                    AND COALESCE(r.status, 'Available') NOT IN ('Occupied', 'Full')
                     AND r.capacity > COALESCE(occupancy.active_occupants, 0)
                 THEN r.id
             END) AS available_rooms
@@ -50,8 +49,8 @@ try {
         LEFT JOIN rooms r ON r.branch_id = b.id
         LEFT JOIN (
             SELECT room_id, COUNT(*) AS active_occupants
-            FROM tenant_leases
-            WHERE status = 'active'
+            FROM tenants
+            WHERE status = 'active' AND room_id IS NOT NULL
             GROUP BY room_id
         ) occupancy ON occupancy.room_id = r.id
         GROUP BY b.id, b.branch_name, b.location

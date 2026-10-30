@@ -49,14 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
         $conn->begin_transaction();
         try {
             $userId = (int) $_SESSION['user_id'];
-            $stmt = $conn->prepare("
-                SELECT r.id, r.branch_id, r.capacity, r.status
-                FROM rooms r
-                INNER JOIN branches b ON b.id = r.branch_id
-                INNER JOIN users u ON u.id = b.landlord_id AND u.role = 'landlord' AND u.status = 'active'
-                WHERE r.id = ?
-                LIMIT 1 FOR UPDATE
-            ");
+            $stmt = $conn->prepare('SELECT id, branch_id, capacity, status FROM rooms WHERE id = ? LIMIT 1 FOR UPDATE');
             $stmt->bind_param('i', $roomId);
             $stmt->execute();
             $requestedRoom = $stmt->get_result()->fetch_assoc();
@@ -70,11 +63,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
                 || ($postedBranchValue !== '' && (!ctype_digit($postedBranchValue) || (int) $postedBranchValue !== (int) $requestedRoom['branch_id']))) {
                 throw new RuntimeException('The selected branch does not match this room.');
             }
-            if (in_array($requestedRoom['status'], ['Maintenance', 'Occupied', 'Full'], true)) {
-                throw new RuntimeException('This room is not accepting applications.');
+            if ($requestedRoom['status'] === 'Maintenance') {
+                throw new RuntimeException('This room is under maintenance and cannot accept applications.');
             }
 
-            $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM tenant_leases WHERE room_id = ? AND status = 'active'");
+            $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM tenants WHERE room_id = ? AND status = 'active'");
             $stmt->bind_param('i', $roomId);
             $stmt->execute();
             $currentOccupants = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
@@ -83,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
                 throw new RuntimeException('This room is already at full capacity. No available slots remain.');
             }
 
-            $stmt = $conn->prepare('SELECT id, status FROM tenants WHERE user_id = ? LIMIT 1 FOR UPDATE');
+            $stmt = $conn->prepare('SELECT id, room_id, status FROM tenants WHERE user_id = ? LIMIT 1 FOR UPDATE');
             $stmt->bind_param('i', $userId);
             $stmt->execute();
             $tenantRecord = $stmt->get_result()->fetch_assoc();
@@ -91,6 +84,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
 
             if (!$tenantRecord) {
                 throw new RuntimeException('Your tenant profile could not be found.');
+            }
+            if ($tenantRecord['room_id'] !== null) {
+                throw new RuntimeException('You already have an assigned room.');
             }
             if (in_array($tenantRecord['status'], ['rejected', 'inactive'], true)) {
                 throw new RuntimeException('Your tenant account is not eligible to apply for a room.');
@@ -100,16 +96,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'apply
             $stmt = $conn->prepare("
                 SELECT id, room_id
                 FROM room_requests
-                WHERE tenant_id = ? AND room_id = ? AND status = 'Pending'
+                WHERE tenant_id = ? AND status = 'Pending'
                 LIMIT 1
             ");
-            $stmt->bind_param('ii', $tenantId, $roomId);
+            $stmt->bind_param('i', $tenantId);
             $stmt->execute();
             $pendingRequest = $stmt->get_result()->fetch_assoc();
             $stmt->close();
 
             if ($pendingRequest) {
-                throw new RuntimeException('You already have a pending request for this room.');
+                if ((int) $pendingRequest['room_id'] === $roomId) {
+                    throw new RuntimeException('You already have a pending request for this room.');
+                }
+                throw new RuntimeException('You already have a pending room application. Wait for it to be reviewed before applying for another room.');
             }
 
             $stmt = $conn->prepare("INSERT INTO room_requests (tenant_id, room_id, status) VALUES (?, ?, 'Pending')");
@@ -181,7 +180,7 @@ if ($roomId > 0 && $branchSelectionError === '') {
 if ($room && isLoggedIn() && ($_SESSION['user_role'] ?? '') === 'tenant') {
     try {
         $userId = (int) $_SESSION['user_id'];
-        $stmt = $conn->prepare('SELECT id, status FROM tenants WHERE user_id = ? LIMIT 1');
+        $stmt = $conn->prepare('SELECT id, room_id, status FROM tenants WHERE user_id = ? LIMIT 1');
         $stmt->bind_param('i', $userId);
         $stmt->execute();
         $currentTenant = $stmt->get_result()->fetch_assoc();
@@ -335,18 +334,33 @@ require_once __DIR__ . '/includes/header.php';
                                     <span>Room applications are available to tenant accounts.</span>
                                 <?php elseif (!$currentTenant): ?>
                                     <span>Your tenant profile could not be found. Please contact the administrator.</span>
-                                <?php elseif (in_array($currentTenant['status'], ['rejected', 'inactive'], true)): ?>
+                                <?php elseif ($currentTenant['room_id'] !== null): ?>
+                                    <span>You already have an assigned room.</span>
+                                <?php elseif ($currentTenant['status'] === 'rejected'): ?>
                                     <span>Your tenant account is not eligible to apply for a room.</span>
                                 <?php elseif ($latestTenantRequest && $latestTenantRequest['status'] === 'Pending'): ?>
                                     <span>You already have a pending request for this room.</span>
                                 <?php else: ?>
-                                    <form method="post" action="room-details.php?id=<?= (int) $room['id']; ?>&amp;branch_id=<?= (int) $room['branch_id']; ?>#room-application" class="room-application-form">
-                                        <input type="hidden" name="action" value="apply_for_room">
-                                        <input type="hidden" name="room_id" value="<?= (int) $room['id']; ?>">
-                                        <input type="hidden" name="branch_id" value="<?= (int) $room['branch_id']; ?>">
-                                        <input type="hidden" name="csrf_token" value="<?= e($_SESSION['room_application_csrf']); ?>">
-                                        <button class="room-application-button" type="submit">Apply for this Room</button>
-                                    </form>
+                                    <?php
+                                    $otherPendingRequest = null;
+                                    foreach ($tenantRequests as $request) {
+                                        if ($request['status'] === 'Pending') {
+                                            $otherPendingRequest = $request;
+                                            break;
+                                        }
+                                    }
+                                    ?>
+                                    <?php if ($otherPendingRequest): ?>
+                                        <span>You already have a pending room application. Wait for it to be reviewed.</span>
+                                    <?php else: ?>
+                                        <form method="post" action="room-details.php?id=<?= (int) $room['id']; ?>&amp;branch_id=<?= (int) $room['branch_id']; ?>#room-application" class="room-application-form">
+                                            <input type="hidden" name="action" value="apply_for_room">
+                                            <input type="hidden" name="room_id" value="<?= (int) $room['id']; ?>">
+                                            <input type="hidden" name="branch_id" value="<?= (int) $room['branch_id']; ?>">
+                                            <input type="hidden" name="csrf_token" value="<?= e($_SESSION['room_application_csrf']); ?>">
+                                            <button class="room-application-button" type="submit">Apply for this Room</button>
+                                        </form>
+                                    <?php endif; ?>
                                 <?php endif; ?>
                             </div>
                         <?php endif; ?>

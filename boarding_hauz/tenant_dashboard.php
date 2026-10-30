@@ -15,8 +15,6 @@ $tenant = null;
 $maintenanceCount = 0;
 $recentPayments = [];
 $latestMaintenance = null;
-$activeLeases = [];
-$leaseHistory = [];
 
 
 /* =========================================================
@@ -27,32 +25,27 @@ $stmt = $conn->prepare("
     SELECT
         t.id AS tenant_id,
         t.full_name,
+        t.room_id,
+        t.move_in_date,
         t.status AS tenant_status,
-        l.id AS lease_id,
-        l.move_in_date,
-        l.monthly_rate AS lease_monthly_rate,
-        r.id AS room_id,
+
         r.room_number,
         r.room_type,
         r.capacity,
         r.monthly_rate,
         r.status AS room_status,
         r.image_path,
-        b.id AS branch_id,
-        b.branch_name,
-        b.location AS branch_location
+        b.branch_name
+
     FROM tenants t
-    LEFT JOIN tenant_leases l ON l.id = (
-        SELECT active_lease.id
-        FROM tenant_leases active_lease
-        WHERE active_lease.tenant_id = t.id AND active_lease.status = 'active'
-        ORDER BY active_lease.id DESC
-        LIMIT 1
-    )
-    LEFT JOIN rooms r ON r.id = l.room_id
+
+    LEFT JOIN rooms r
+        ON r.id = t.room_id
     LEFT JOIN branches b
         ON b.id = r.branch_id
+
     WHERE t.user_id = ?
+
     LIMIT 1
 ");
 
@@ -65,40 +58,6 @@ $stmt->close();
 if ($tenant && $tenant['room_id'] !== null) {
     $tenant = attachRoomOccupancy($conn, [$tenant])[0];
     $tenant['room_status'] = $tenant['occupancy_status'];
-    $tenant['monthly_rate'] = (float) $tenant['lease_monthly_rate'];
-}
-
-if ($tenant) {
-    $tenantId = (int) $tenant['tenant_id'];
-    $stmt = $conn->prepare("
-        SELECT l.id AS lease_id, l.move_in_date, l.monthly_rate,
-            r.id AS room_id, r.room_number, r.room_type, r.capacity, r.status AS room_status,
-            r.image_path, b.id AS branch_id, b.branch_name, b.location AS branch_location
-        FROM tenant_leases l
-        INNER JOIN rooms r ON r.id = l.room_id
-        INNER JOIN branches b ON b.id = r.branch_id
-        WHERE l.tenant_id = ? AND l.status = 'active'
-        ORDER BY l.created_at DESC, l.id DESC
-    ");
-    $stmt->bind_param('i', $tenantId);
-    $stmt->execute();
-    $activeLeases = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-    $stmt->close();
-    $activeLeases = attachRoomOccupancy($conn, $activeLeases);
-
-    $stmt = $conn->prepare("
-        SELECT l.id AS lease_id, l.move_in_date, l.ended_at, l.monthly_rate,
-            r.room_number, r.room_type, b.branch_name
-        FROM tenant_leases l
-        INNER JOIN rooms r ON r.id = l.room_id
-        INNER JOIN branches b ON b.id = r.branch_id
-        WHERE l.tenant_id = ? AND l.status = 'ended'
-        ORDER BY COALESCE(l.ended_at, l.created_at) DESC, l.id DESC
-    ");
-    $stmt->bind_param('i', $tenantId);
-    $stmt->execute();
-    $leaseHistory = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-    $stmt->close();
 }
 
 $currentPaymentDue = null;
@@ -107,9 +66,7 @@ if ($tenant && !empty($tenant['room_id'])) {
         $conn,
         (int) $tenant['tenant_id'],
         (float) ($tenant['monthly_rate'] ?? 0),
-        $tenant['move_in_date'] ?? null,
-        null,
-        (int) ($tenant['lease_id'] ?? 0)
+        $tenant['move_in_date'] ?? null
     );
 }
 
@@ -123,18 +80,13 @@ if ($tenant) {
 
     $stmt = $conn->prepare("
         SELECT
-            p.amount_paid,
-            p.payment_date,
-            p.payment_method,
-            p.status,
-            b.branch_name,
-            r.room_number
-        FROM payments p
-        LEFT JOIN tenant_leases l ON l.id = p.lease_id
-        LEFT JOIN rooms r ON r.id = l.room_id
-        LEFT JOIN branches b ON b.id = r.branch_id
-        WHERE p.tenant_id = ?
-        ORDER BY p.payment_date DESC, p.id DESC
+            amount_paid,
+            payment_date,
+            payment_method,
+            status
+        FROM payments
+        WHERE tenant_id = ?
+        ORDER BY payment_date DESC, id DESC
         LIMIT 5
     ");
     $stmt->bind_param("i", $tenantId);
@@ -2211,55 +2163,6 @@ body.tenant-portal {
     padding: 20px;
 }
 
-.dashboard-rental-list {
-    display: grid;
-    gap: 9px;
-}
-
-.dashboard-rental-item {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px;
-    border: 1px solid rgba(2, 53, 60, .1);
-    border-radius: 10px;
-    background: rgba(255, 255, 255, .72);
-}
-
-.dashboard-rental-item strong,
-.dashboard-rental-item span {
-    display: block;
-}
-
-.dashboard-rental-item strong {
-    color: #02353c;
-    font-size: 12px;
-}
-
-.dashboard-rental-item span {
-    margin-top: 3px;
-    color: #315c5d;
-    font-size: 11px;
-}
-
-.dashboard-rental-item a {
-    color: #087f67;
-    font-size: 11px;
-    font-weight: 700;
-}
-
-.dashboard-rental-item.is-ended {
-    opacity: .78;
-}
-
-.dashboard-history-heading {
-    margin: 20px 0 10px;
-    color: #02353c;
-    font-size: 14px;
-}
-
 .dashboard-restored .dashboard-panel-heading {
     margin-bottom: 13px;
 }
@@ -2751,50 +2654,6 @@ body.tenant-portal {
                     <div class="room-action"><a href="rooms.php" class="btn-primary">Browse Rooms</a></div>
                 <?php endif; ?>
             </div>
-        </section>
-
-        <section class="dashboard-panel" aria-labelledby="rental-overview-title">
-            <div class="dashboard-panel-heading">
-                <div>
-                    <span class="section-label">MULTI-BRANCH RENTALS</span>
-                    <h2 class="section-title" id="rental-overview-title">My Active Rooms</h2>
-                </div>
-                <a href="rooms.php" class="summary-link">Browse all branches →</a>
-            </div>
-            <?php if ($activeLeases): ?>
-                <div class="dashboard-rental-list">
-                    <?php foreach ($activeLeases as $lease): ?>
-                        <article class="dashboard-rental-item">
-                            <div>
-                                <strong><?= e(roomDisplayTitle($lease['room_number'])); ?> · <?= e($lease['branch_name']); ?></strong>
-                                <span><?= e($lease['room_type']); ?> · <?= e($lease['branch_location']); ?></span>
-                            </div>
-                            <div>
-                                <strong>₱<?= number_format((float) $lease['monthly_rate'], 2); ?>/month</strong>
-                                <span><?= (int) $lease['current_occupants']; ?>/<?= (int) $lease['capacity']; ?> occupants</span>
-                            </div>
-                            <a href="tenant_room.php?lease_id=<?= (int) $lease['lease_id']; ?>">View room</a>
-                        </article>
-                    <?php endforeach; ?>
-                </div>
-            <?php else: ?>
-                <p class="dashboard-empty">No active rentals yet. Browse rooms at any available branch.</p>
-            <?php endif; ?>
-
-            <?php if ($leaseHistory): ?>
-                <h3 class="dashboard-history-heading">Rental History</h3>
-                <div class="dashboard-rental-list">
-                    <?php foreach ($leaseHistory as $lease): ?>
-                        <article class="dashboard-rental-item is-ended">
-                            <div>
-                                <strong><?= e(roomDisplayTitle($lease['room_number'])); ?> · <?= e($lease['branch_name']); ?></strong>
-                                <span><?= e($lease['room_type']); ?> · Ended <?= e($lease['ended_at'] ? dashboardDate($lease['ended_at']) : 'date not recorded'); ?></span>
-                            </div>
-                            <strong>₱<?= number_format((float) $lease['monthly_rate'], 2); ?>/month</strong>
-                        </article>
-                    <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
         </section>
 
         <section class="billing-maintenance-grid" aria-label="Rent and maintenance">

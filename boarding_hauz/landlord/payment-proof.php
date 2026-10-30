@@ -12,6 +12,7 @@ if ($paymentId <= 0) {
 $stmt = $conn->prepare('
     SELECT pay.proof_path
     FROM payments pay
+    INNER JOIN tenants t ON t.id = pay.tenant_id AND t.branch_id = pay.branch_id
     WHERE pay.id = ? AND pay.branch_id = ?
     LIMIT 1
 ');

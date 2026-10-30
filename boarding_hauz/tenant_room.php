@@ -8,74 +8,45 @@ $roomPolicies = require __DIR__ . '/includes/room_policies.php';
 
 $tenant_title = 'My Room';
 $userId = (int) $_SESSION['user_id'];
-$stmt = $conn->prepare('SELECT id AS tenant_id, full_name, status AS tenant_status FROM tenants WHERE user_id = ? LIMIT 1');
+$stmt = $conn->prepare("
+    SELECT
+        t.id AS tenant_id,
+        t.full_name,
+        t.move_in_date,
+        t.status AS tenant_status,
+        r.id AS room_id,
+        r.room_number,
+        r.room_type,
+        r.capacity,
+        r.monthly_rate,
+        r.status AS room_status,
+        r.image_path,
+        b.branch_name
+    FROM tenants t
+    LEFT JOIN rooms r ON r.id = t.room_id
+    LEFT JOIN branches b ON b.id = r.branch_id
+    WHERE t.user_id = ?
+    LIMIT 1
+");
+if (!$stmt) {
+    throw new mysqli_sql_exception($conn->error);
+}
 $stmt->bind_param('i', $userId);
 $stmt->execute();
-$tenantProfile = $stmt->get_result()->fetch_assoc();
+$tenant = $stmt->get_result()->fetch_assoc();
 $stmt->close();
-
-$activeLeases = [];
-$leaseHistory = [];
-$tenant = null;
-$leaseSelectionError = '';
-if ($tenantProfile) {
-    $tenantId = (int) $tenantProfile['tenant_id'];
-    $stmt = $conn->prepare("
-        SELECT l.id AS lease_id, l.move_in_date, l.monthly_rate,
-            r.id AS room_id, r.room_number, r.room_type, r.capacity, r.status AS room_status, r.image_path,
-            b.id AS branch_id, b.branch_name, b.location AS branch_location
-        FROM tenant_leases l
-        INNER JOIN rooms r ON r.id = l.room_id
-        INNER JOIN branches b ON b.id = r.branch_id
-        WHERE l.tenant_id = ? AND l.status = 'active'
-        ORDER BY l.created_at DESC, l.id DESC
-    ");
-    $stmt->bind_param('i', $tenantId);
-    $stmt->execute();
-    $activeLeases = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-    $stmt->close();
-    foreach ($activeLeases as &$lease) {
-        $lease['tenant_id'] = $tenantId;
-        $lease['full_name'] = $tenantProfile['full_name'];
-        $lease['tenant_status'] = $tenantProfile['tenant_status'];
-    }
-    unset($lease);
-    $activeLeases = attachRoomOccupancy($conn, $activeLeases);
-
-    $stmt = $conn->prepare("
-        SELECT l.id AS lease_id, l.move_in_date, l.ended_at, l.monthly_rate,
-            r.room_number, r.room_type, b.branch_name
-        FROM tenant_leases l
-        INNER JOIN rooms r ON r.id = l.room_id
-        INNER JOIN branches b ON b.id = r.branch_id
-        WHERE l.tenant_id = ? AND l.status = 'ended'
-        ORDER BY COALESCE(l.ended_at, l.created_at) DESC, l.id DESC
-    ");
-    $stmt->bind_param('i', $tenantId);
-    $stmt->execute();
-    $leaseHistory = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-    $stmt->close();
-
-    $requestedLeaseValue = is_scalar($_GET['lease_id'] ?? null) ? (string) $_GET['lease_id'] : '';
-    $selectedLeaseId = ctype_digit($requestedLeaseValue) ? (int) $requestedLeaseValue : 0;
-    foreach ($activeLeases as $activeLease) {
-        if ($selectedLeaseId === 0 || (int) $activeLease['lease_id'] === $selectedLeaseId) {
-            $tenant = $activeLease;
-            break;
-        }
-    }
-    if ($selectedLeaseId > 0 && !$tenant) {
-        $leaseSelectionError = 'That active lease could not be found on your account.';
-    } else {
-        $leaseSelectionError = '';
-    }
+if ($tenant && $tenant['room_id'] !== null) {
+    $tenant = attachRoomOccupancy($conn, [$tenant])[0];
+    $tenant['room_status'] = $tenant['occupancy_status'];
 }
 
 $hasRoom = $tenant && !empty($tenant['room_id']);
 $roomImageUrl = $hasRoom
     ? getRoomImageUrlForDisplay((int) $tenant['room_id'], $tenant['image_path'])
     : null;
-$tenantStatus = ucfirst(strtolower((string) ($tenantProfile['tenant_status'] ?? 'pending')));
+$tenantStatus = $tenant
+    ? ucfirst(strtolower((string) $tenant['tenant_status']))
+    : 'Pending';
 $roomTitle = $hasRoom
     ? roomDisplayTitle((string) $tenant['room_number'])
     : '';
@@ -91,9 +62,6 @@ if ($hasRoom && !empty($tenant['move_in_date'])) {
 }
 $capacity = $hasRoom ? max(0, (int) $tenant['capacity']) : 0;
 $roomPoliciesList = [];
-$roomDetailsLink = $hasRoom
-    ? 'room-details.php?id=' . (int) $tenant['room_id'] . '&branch_id=' . (int) $tenant['branch_id']
-    : 'rooms.php';
 
 function parseRoomAmenities(string $roomType): array
 {
@@ -704,36 +672,6 @@ body.tenant-portal {
     gap: 8px;
 }
 
-.lease-list {
-    display: grid;
-    gap: 9px;
-}
-
-.lease-list-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    padding: 12px 14px;
-    border: 1px solid #dce9e0;
-    border-radius: 10px;
-    background: #fff;
-    color: #02353c;
-    text-decoration: none;
-}
-
-.lease-list-item.is-selected {
-    border-color: #2eaf7d;
-    background: #f1fbf6;
-}
-
-.lease-list-item span {
-    display: block;
-    margin-top: 3px;
-    color: #58736a;
-    font-size: 11px;
-}
-
 .my-room-heading {
     display: flex;
     align-items: center;
@@ -973,59 +911,14 @@ body.tenant-portal {
                 <div class="my-room-heading-status" aria-label="Tenant status">
                     <span class="room-page-status"><?= e($tenantStatus); ?> Tenant</span>
                 </div>
-            <?php elseif ($tenantProfile): ?>
-                <div class="my-room-heading-status" aria-label="Tenant status">
-                    <span class="room-page-status"><?= e($tenantStatus); ?> Tenant</span>
-                </div>
             <?php endif; ?>
         </header>
-
-        <?php if ($leaseSelectionError !== ''): ?>
-            <section class="my-room-empty" role="alert">
-                <p><?= e($leaseSelectionError); ?></p>
-                <a class="my-room-button" href="tenant_room.php">View my active rooms</a>
-            </section>
-        <?php endif; ?>
-
-        <?php if ($activeLeases): ?>
-            <section class="my-room-panel" aria-labelledby="active-leases-heading">
-                <h2 class="my-room-panel-heading" id="active-leases-heading">My Active Rooms</h2>
-                <div class="lease-list">
-                    <?php foreach ($activeLeases as $activeLease): ?>
-                        <a class="lease-list-item<?= $tenant && (int) $tenant['lease_id'] === (int) $activeLease['lease_id'] ? ' is-selected' : ''; ?>"
-                           href="tenant_room.php?lease_id=<?= (int) $activeLease['lease_id']; ?>">
-                            <strong><?= e(roomDisplayTitle($activeLease['room_number'])); ?> · <?= e($activeLease['branch_name']); ?>
-                                <span><?= e($activeLease['room_type']); ?> · <?= e($activeLease['branch_location']); ?></span>
-                            </strong>
-                            <span>₱<?= number_format((float) $activeLease['monthly_rate'], 2); ?>/month</span>
-                        </a>
-                    <?php endforeach; ?>
-                </div>
-                <p style="margin:14px 0 0"><a class="my-room-button" href="rooms.php">Browse rooms in all branches</a></p>
-            </section>
-        <?php endif; ?>
-
-        <?php if ($leaseHistory): ?>
-            <section class="my-room-panel" aria-labelledby="lease-history-heading">
-                <h2 class="my-room-panel-heading" id="lease-history-heading">Past Rentals</h2>
-                <div class="lease-list">
-                    <?php foreach ($leaseHistory as $pastLease): ?>
-                        <div class="lease-list-item">
-                            <strong><?= e(roomDisplayTitle($pastLease['room_number'])); ?> · <?= e($pastLease['branch_name']); ?>
-                                <span><?= e($pastLease['room_type']); ?> · Ended <?= e($pastLease['ended_at'] ? date('M j, Y', strtotime($pastLease['ended_at'])) : 'date not recorded'); ?></span>
-                            </strong>
-                            <span>₱<?= number_format((float) $pastLease['monthly_rate'], 2); ?>/month</span>
-                        </div>
-                    <?php endforeach; ?>
-                </div>
-            </section>
-        <?php endif; ?>
 
         <?php if (!$tenant || !$hasRoom): ?>
             <section class="my-room-empty" aria-labelledby="no-room-title">
                 <h2 id="no-room-title">No room assigned yet</h2>
-                <p><?php if ($leaseSelectionError === ''): ?>You can now browse rooms and apply at any active branch.<?php else: ?>Select one of your active rooms above.<?php endif; ?></p>
-                <a class="my-room-button" href="rooms.php">Browse rooms in all branches</a>
+                <p>Your room details will appear here after management assigns a room to your tenant account.</p>
+                <a class="my-room-button" href="tenant_messages.php">Message Admin</a>
             </section>
         <?php else: ?>
             <?php
@@ -1071,7 +964,7 @@ body.tenant-portal {
 
                     <div class="my-room-actions">
                         <a class="my-room-button" href="tenant_maintenance.php">Need room service?</a>
-                        <a class="my-room-button secondary" href="tenant_payments.php?lease_id=<?= (int) $tenant['lease_id']; ?>">View Payment History</a>
+                        <a class="my-room-button secondary" href="tenant_payments.php">View Payment History</a>
                     </div>
                 </div>
             </section>

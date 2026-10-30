@@ -240,14 +240,14 @@ if (hasRole('landlord')) {
                 <form method="post" action="/boarding_hauz/landlord/branch-switch.php" class="admin-branch-switch">
                     <input type="hidden" name="csrf_token" value="<?php echo e($_SESSION['branch_switch_csrf']); ?>">
                     <label class="visually-hidden" for="admin-branch-select">Active branch</label>
-                    <select id="admin-branch-select" name="branch_id" onchange="this.form.submit()">
+                    <select id="admin-branch-select" name="branch_id">
                         <?php foreach ($admin_branches as $branch): ?>
                             <option value="<?php echo (int) $branch['id']; ?>" <?php echo currentBranchId() === (int) $branch['id'] ? 'selected' : ''; ?>>
                                 <?php echo e($branch['branch_name']); ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
-                    <noscript><button type="submit">Switch</button></noscript>
+                    <button type="submit">Switch</button>
                 </form>
             <?php endif; ?>
             <a href="<?php echo e($dashboardPath); ?>" class="admin-dashboard-link <?php echo in_array($admin_page, ['dashboard.php', 'platform_dashboard.php'], true) ? 'active' : ''; ?>">Dashboard</a>

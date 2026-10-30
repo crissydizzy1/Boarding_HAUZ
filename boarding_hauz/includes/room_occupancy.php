@@ -6,7 +6,6 @@ function calculateRoomOccupancy(int $capacity, int $occupants, string $storedSta
     $occupants = max(0, $occupants);
     $isMaintenance = $storedStatus === 'Maintenance';
     $availableSlots = max(0, $capacity - $occupants);
-    $isStoredUnavailable = in_array($storedStatus, ['Occupied', 'Full'], true);
 
     if ($isMaintenance) {
         $occupancyStatus = 'Maintenance';
@@ -25,43 +24,8 @@ function calculateRoomOccupancy(int $capacity, int $occupants, string $storedSta
         'available_slots' => $availableSlots,
         'occupancy_percentage' => $capacity > 0 ? min(100.0, ($occupants / $capacity) * 100) : 0.0,
         'occupancy_status' => $occupancyStatus,
-        'accepts_tenants' => !$isMaintenance && !$isStoredUnavailable && $capacity > 0 && $occupants < $capacity,
+        'accepts_tenants' => !$isMaintenance && $capacity > 0 && $occupants < $capacity,
     ];
-}
-
-function synchronizeRoomAvailability(mysqli $conn, int $roomId): void
-{
-    if ($roomId <= 0) {
-        throw new InvalidArgumentException('A valid room is required to synchronize availability.');
-    }
-
-    $stmt = $conn->prepare('SELECT capacity, status FROM rooms WHERE id = ? LIMIT 1 FOR UPDATE');
-    $stmt->bind_param('i', $roomId);
-    $stmt->execute();
-    $room = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    if (!$room) {
-        throw new RuntimeException('The room could not be found while updating availability.');
-    }
-    if ($room['status'] === 'Maintenance') {
-        return;
-    }
-
-    $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM tenant_leases WHERE room_id = ? AND status = 'active'");
-    $stmt->bind_param('i', $roomId);
-    $stmt->execute();
-    $activeLeases = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
-    $stmt->close();
-
-    $newStatus = (int) $room['capacity'] > 0 && $activeLeases >= (int) $room['capacity']
-        ? 'Occupied'
-        : 'Available';
-    if ($newStatus !== $room['status']) {
-        $stmt = $conn->prepare('UPDATE rooms SET status = ? WHERE id = ?');
-        $stmt->bind_param('si', $newStatus, $roomId);
-        $stmt->execute();
-        $stmt->close();
-    }
 }
 
 function attachRoomOccupancy(mysqli $conn, array $rooms): array
@@ -86,7 +50,7 @@ function attachRoomOccupancy(mysqli $conn, array $rooms): array
         $placeholders = implode(', ', array_fill(0, count($roomIds), '?'));
         $stmt = $conn->prepare("
             SELECT room_id, COUNT(*) AS current_occupants
-            FROM tenant_leases
+            FROM tenants
             WHERE status = 'active' AND room_id IN ($placeholders)
             GROUP BY room_id
         ");

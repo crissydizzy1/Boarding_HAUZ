@@ -56,43 +56,8 @@ function redirectTo(string $path): never
 
 function currentBranchId(): ?int
 {
-    $sessionRole = $_SESSION['role'] ?? $_SESSION['user_role'] ?? '';
-    if ($sessionRole !== 'landlord' || !isLoggedIn()) {
-        $branchId = $_SESSION['active_branch_id'] ?? $_SESSION['branch_id'] ?? null;
-        return is_numeric($branchId) && (int) $branchId > 0 ? (int) $branchId : null;
-    }
-
-    global $conn;
-    $landlordId = (int) $_SESSION['user_id'];
-    $requestedBranchId = $_SESSION['active_branch_id'] ?? $_SESSION['branch_id'] ?? null;
-    if (is_numeric($requestedBranchId) && (int) $requestedBranchId > 0) {
-        $branchId = (int) $requestedBranchId;
-        $stmt = $conn->prepare('SELECT id FROM branches WHERE id = ? AND landlord_id = ? LIMIT 1');
-        $stmt->bind_param('ii', $branchId, $landlordId);
-        $stmt->execute();
-        $authorizedBranch = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-        if ($authorizedBranch) {
-            $_SESSION['active_branch_id'] = $branchId;
-            $_SESSION['branch_id'] = $branchId;
-            return $branchId;
-        }
-    }
-
-    $stmt = $conn->prepare('SELECT id FROM branches WHERE landlord_id = ? ORDER BY id LIMIT 1');
-    $stmt->bind_param('i', $landlordId);
-    $stmt->execute();
-    $firstBranch = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    if (!$firstBranch) {
-        unset($_SESSION['active_branch_id'], $_SESSION['branch_id']);
-        return null;
-    }
-
-    $branchId = (int) $firstBranch['id'];
-    $_SESSION['active_branch_id'] = $branchId;
-    $_SESSION['branch_id'] = $branchId;
-    return $branchId;
+    $branchId = $_SESSION['branch_id'] ?? null;
+    return is_numeric($branchId) && (int) $branchId > 0 ? (int) $branchId : null;
 }
 
 function currentUser(): ?array

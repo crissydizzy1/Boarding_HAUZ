@@ -27,7 +27,6 @@ if (!$branch) {
     exit('You are not authorized to access that branch.');
 }
 
-$_SESSION['active_branch_id'] = $branchId;
 $_SESSION['branch_id'] = $branchId;
 $_SESSION['branch_switch_csrf'] = bin2hex(random_bytes(32));
 redirectTo(dashboardPathForRole());

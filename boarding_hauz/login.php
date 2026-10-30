@@ -176,11 +176,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['role'] = $user['role'] === 'admin' ? 'super_admin' : $user['role'];
                 $_SESSION['user_role'] = $_SESSION['role'];
                 $_SESSION['branch_id'] = $branchId;
-                if ($_SESSION['role'] === 'landlord' && $branchId !== null) {
-                    $_SESSION['active_branch_id'] = $branchId;
-                } else {
-                    unset($_SESSION['active_branch_id']);
-                }
                 if ($_SESSION['role'] === 'tenant') {
                     $_SESSION['tenant_login_time'] = time();
                     $_SESSION['tenant_last_activity'] = $_SESSION['tenant_login_time'];

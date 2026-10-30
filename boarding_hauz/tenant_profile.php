@@ -23,7 +23,8 @@ $stmt = $conn->prepare("
         u.created_at,
         t.id AS tenant_id,
         t.full_name,
-        t.contact_number
+        t.contact_number,
+        t.room_id
     FROM users u
     LEFT JOIN tenants t ON t.user_id = u.id
     WHERE u.id = ?
@@ -159,7 +160,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
                     u.created_at,
                     t.id AS tenant_id,
                     t.full_name,
-                    t.contact_number
+                    t.contact_number,
+                    t.room_id
                 FROM users u
                 LEFT JOIN tenants t ON t.user_id = u.id
                 WHERE u.id = ?

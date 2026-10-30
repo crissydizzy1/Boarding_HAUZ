@@ -1,0 +1,26 @@
+# Normalize source and configuration text files across Windows, macOS and Linux.
+* text=auto
+*.php text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.sql text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.html text eol=lf
+*.htaccess text eol=lf
+*.svg text eol=lf
+Dockerfile text eol=lf
+LICENSE text eol=lf
+.env.example text eol=lf
+.gitignore text eol=lf
+.dockerignore text eol=lf
+
+# Keep binary assets byte-for-byte.
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.webp binary
+*.zip binary

@@ -20,6 +20,8 @@ if (empty($_SESSION['tenant_maintenance_csrf'])) {
 $stmt = $conn->prepare("
     SELECT
         t.id,
+        t.branch_id,
+        t.room_id,
         t.full_name
     FROM tenants t
     WHERE t.user_id = ?
@@ -37,33 +39,10 @@ if (!$tenant) {
 }
 
 $tenantId = (int) $tenant['id'];
-$leaseOptions = [];
-$leaseStmt = $conn->prepare("
-    SELECT l.id AS lease_id, l.room_id, r.branch_id, r.room_number, b.branch_name
-    FROM tenant_leases l
-    INNER JOIN rooms r ON r.id = l.room_id
-    INNER JOIN branches b ON b.id = r.branch_id
-    WHERE l.tenant_id = ? AND l.status = 'active'
-    ORDER BY b.branch_name, r.room_number, l.id
-");
-$leaseStmt->bind_param('i', $tenantId);
-$leaseStmt->execute();
-$leaseOptions = $leaseStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-$leaseStmt->close();
-$selectedLeaseIdValue = is_scalar($_POST['lease_id'] ?? $_GET['lease_id'] ?? null)
-    ? (string) ($_POST['lease_id'] ?? $_GET['lease_id'])
-    : '';
-$selectedLeaseId = ctype_digit($selectedLeaseIdValue) ? (int) $selectedLeaseIdValue : 0;
-$selectedLease = null;
-foreach ($leaseOptions as $leaseOption) {
-    if ($selectedLeaseId === 0 || (int) $leaseOption['lease_id'] === $selectedLeaseId) {
-        $selectedLease = $leaseOption;
-        $selectedLeaseId = (int) $leaseOption['lease_id'];
-        break;
-    }
-}
-$tenantBranchId = $selectedLease ? (int) $selectedLease['branch_id'] : null;
-$roomId = $selectedLease ? (int) $selectedLease['room_id'] : null;
+$tenantBranchId = $tenant['branch_id'] === null ? null : (int) $tenant['branch_id'];
+$roomId = !empty($tenant['room_id'])
+    ? (int) $tenant['room_id']
+    : null;
 
 
 /* =========================================================
@@ -75,15 +54,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 
     $category = trim($_POST['category'] ?? '');
     $description = trim($_POST['description'] ?? '');
-    $postedLeaseIdValue = is_scalar($_POST['lease_id'] ?? null) ? (string) $_POST['lease_id'] : '';
-    $postedLeaseId = ctype_digit($postedLeaseIdValue) ? (int) $postedLeaseIdValue : 0;
-    $postedLease = null;
-    foreach ($leaseOptions as $leaseOption) {
-        if ((int) $leaseOption['lease_id'] === $postedLeaseId) {
-            $postedLease = $leaseOption;
-            break;
-        }
-    }
     $postedToken = is_string($_POST['csrf_token'] ?? null) ? $_POST['csrf_token'] : '';
 
     $allowedCategories = [
@@ -97,8 +67,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 
     if (!hash_equals($_SESSION['tenant_maintenance_csrf'], $postedToken)) {
         $errorMessage = 'Your session could not be verified. Refresh the page and try again.';
-    } elseif (!$postedLease || !$roomId || $postedLeaseId !== $selectedLeaseId) {
-        $errorMessage = 'Select one of your active rentals for this maintenance request.';
+    } elseif (empty($tenant['branch_id']) || empty($roomId)) {
+        $errorMessage = 'A branch room must be assigned before submitting a maintenance request.';
     } elseif ($category === '') {
 
         $errorMessage = 'Please select a problem type.';
@@ -123,8 +93,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
          *
          * The room ID also comes from the tenant record.
          */
-        $requestBranchId = (int) $postedLease['branch_id'];
-        $requestRoomId = (int) $postedLease['room_id'];
         $stmt = $conn->prepare("
             INSERT INTO maintenance_requests (
                 branch_id,
@@ -139,9 +107,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 
         $stmt->bind_param(
             'iiiss',
-            $requestBranchId,
+            $tenantBranchId,
             $tenantId,
-            $requestRoomId,
+            $roomId,
             $category,
             $description
         );
@@ -864,21 +832,6 @@ include __DIR__ . '/includes/tenant_header.php';
                         class="maintenance-form"
                     >
                         <input type="hidden" name="csrf_token" value="<?= e($_SESSION['tenant_maintenance_csrf']); ?>">
-                        <?php if (count($leaseOptions) > 1): ?>
-                            <div class="form-group">
-                                <label for="lease_id">Rental</label>
-                                <select id="lease_id" name="lease_id" class="form-select" required>
-                                    <?php foreach ($leaseOptions as $leaseOption): ?>
-                                        <option value="<?= (int) $leaseOption['lease_id']; ?>" <?= $selectedLeaseId === (int) $leaseOption['lease_id'] ? 'selected' : ''; ?>>
-                                            <?= e($leaseOption['branch_name'] . ' · ' . $leaseOption['room_number']); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                        <?php elseif ($selectedLease): ?>
-                            <input type="hidden" name="lease_id" value="<?= (int) $selectedLeaseId; ?>">
-                            <p>Rental: <?= e($selectedLease['branch_name'] . ' · ' . $selectedLease['room_number']); ?></p>
-                        <?php endif; ?>
 
 
                         <!-- Problem Type -->

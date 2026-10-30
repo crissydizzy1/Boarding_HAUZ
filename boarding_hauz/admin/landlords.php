@@ -33,8 +33,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!hash_equals($_SESSION['super_admin_landlords_csrf'], $postedToken)) {
         $error = 'Your session could not be verified. Refresh the page and try again.';
-    } elseif (in_array($_POST['action'] ?? '', ['create_landlord', 'update_landlord', 'set_landlord_status'], true)) {
-        $error = 'Landlord accounts are managed as a single master account. Add or edit branches instead.';
     } elseif (($_POST['action'] ?? '') === 'update_branch') {
         $branchValue = is_scalar($_POST['branch_id'] ?? null) ? (string) $_POST['branch_id'] : '';
         $targetBranchId = ctype_digit($branchValue) ? (int) $branchValue : 0;
@@ -54,7 +52,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     FROM branches b
                     INNER JOIN users u ON u.id = b.landlord_id
                     WHERE b.id = ? AND b.landlord_id = ? AND u.role = ?
-                      AND u.username = 'Landlord' AND u.email = 'landlord@boardinghauz.local'
                     LIMIT 1
                 ");
                 $stmt->bind_param('iis', $targetBranchId, $targetLandlordId, $landlordRole);
@@ -168,7 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Choose a landlord and enter a valid branch name and location.';
         } else {
             try {
-                $stmt = $conn->prepare("SELECT id FROM users WHERE id = ? AND role = 'landlord' AND status = 'active' AND username = 'Landlord' AND email = 'landlord@boardinghauz.local' LIMIT 1");
+                $stmt = $conn->prepare("SELECT id FROM users WHERE id = ? AND role = 'landlord' AND status = 'active' LIMIT 1");
                 $stmt->bind_param('i', $targetLandlordId);
                 $stmt->execute();
                 $validLandlord = (bool) $stmt->get_result()->fetch_assoc();
@@ -343,7 +340,7 @@ if ($landlords) {
     $branchStmt->close();
 }
 $landlordAccounts = [];
-$stmt = $conn->prepare("SELECT id, username, email FROM users WHERE role = 'landlord' AND status = 'active' AND username = 'Landlord' AND email = 'landlord@boardinghauz.local' ORDER BY id");
+$stmt = $conn->prepare("SELECT id, username, email FROM users WHERE role = 'landlord' AND status = 'active' ORDER BY username, id");
 $stmt->execute();
 $landlordAccounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
@@ -354,7 +351,7 @@ include __DIR__ . '/admin_header.php';
     <header class="admin-page-header">
         <span class="admin-page-label">SUPER ADMIN</span>
         <h1>Landlords &amp; Branches</h1>
-        <p>One master Landlord account manages the registered South Cotabato branches. Add branches here; branch access and property records stay isolated by the selected branch.</p>
+        <p>Create and manage landlord accounts and branches. Landlords can only access tenants, rooms, and activity assigned to their branches. Suspended accounts retain their records but cannot sign in.</p>
     </header>
 
     <?php if ($success !== ''): ?>
@@ -365,19 +362,35 @@ include __DIR__ . '/admin_header.php';
     <?php endif; ?>
 
     <section class="landlord-card">
-        <h2>Add branch to the master Landlord account</h2>
+        <h2>Create landlord</h2>
+        <form method="post" class="landlord-form">
+            <input type="hidden" name="csrf_token" value="<?= e($_SESSION['super_admin_landlords_csrf']); ?>">
+            <input type="hidden" name="action" value="create_landlord">
+            <label>Username<input name="username" maxlength="100" autocomplete="username" required value="<?= e($form['username']); ?>"></label>
+            <label>Email<input name="email" type="email" maxlength="255" autocomplete="email" required value="<?= e($form['email']); ?>"></label>
+            <label>Password (12+ characters)<input name="password" type="password" minlength="12" maxlength="4096" autocomplete="new-password" required></label>
+            <label>Branch name<input name="branch_name" maxlength="120" required value="<?= e($form['branch_name']); ?>"></label>
+            <label class="full-width">Branch location<input name="location" maxlength="255" required value="<?= e($form['location']); ?>"></label>
+            <button type="submit">Create landlord and branch</button>
+        </form>
+    </section>
+
+    <section class="landlord-card">
+        <h2>Add branch to an existing landlord</h2>
         <form method="post" class="landlord-form">
             <input type="hidden" name="csrf_token" value="<?= e($_SESSION['super_admin_landlords_csrf']); ?>">
             <input type="hidden" name="action" value="create_branch">
-            <?php if ($landlordAccounts): ?>
-                <input type="hidden" name="landlord_id" value="<?= (int) $landlordAccounts[0]['id']; ?>">
-                <p class="full-width">New branch will belong to <?= e($landlordAccounts[0]['username']); ?>.</p>
-            <?php else: ?>
-                <p class="landlord-alert error full-width">The master Landlord account has not been seeded yet.</p>
-            <?php endif; ?>
+            <label>Landlord
+                <select name="landlord_id" required>
+                    <option value="">Choose a landlord</option>
+                    <?php foreach ($landlordAccounts as $landlordAccount): ?>
+                        <option value="<?= (int) $landlordAccount['id']; ?>"><?= e($landlordAccount['username'] . ' (' . $landlordAccount['email'] . ')'); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
             <label>Branch name<input name="new_branch_name" maxlength="120" required></label>
             <label class="full-width">Branch location<input name="new_branch_location" maxlength="255" required></label>
-            <button type="submit" <?= !$landlordAccounts ? 'disabled' : ''; ?>>Add branch</button>
+            <button type="submit">Add branch</button>
         </form>
     </section>
 
@@ -432,7 +445,22 @@ include __DIR__ . '/admin_header.php';
                                 <details class="landlord-actions">
                                     <summary>Manage</summary>
                                     <div class="landlord-action-panel">
-                                        <p class="landlord-email">Master account credentials are fixed and cannot be changed or suspended here.</p>
+                                        <form method="post" class="landlord-row-form">
+                                            <input type="hidden" name="csrf_token" value="<?= e($_SESSION['super_admin_landlords_csrf']); ?>">
+                                            <input type="hidden" name="action" value="update_landlord">
+                                            <input type="hidden" name="landlord_id" value="<?= (int) $landlord['id']; ?>">
+                                            <label>Username<input name="edit_username" maxlength="100" value="<?= e($landlord['username']); ?>" required></label>
+                                            <label>Email<input name="edit_email" type="email" maxlength="255" value="<?= e($landlord['email']); ?>" required></label>
+                                            <label>Replacement password (optional)<input name="new_password" type="password" minlength="12" maxlength="4096" autocomplete="new-password"></label>
+                                            <button type="submit">Save account</button>
+                                        </form>
+                                        <form method="post" class="landlord-row-form landlord-status-form" <?= $landlord['status'] === 'active' ? 'onsubmit="return confirm(\'Suspend this account? Its records will be retained.\');"' : ''; ?>>
+                                            <input type="hidden" name="csrf_token" value="<?= e($_SESSION['super_admin_landlords_csrf']); ?>">
+                                            <input type="hidden" name="action" value="set_landlord_status">
+                                            <input type="hidden" name="landlord_id" value="<?= (int) $landlord['id']; ?>">
+                                            <input type="hidden" name="landlord_status" value="<?= $landlord['status'] === 'active' ? 'inactive' : 'active'; ?>">
+                                            <button type="submit"><?= $landlord['status'] === 'active' ? 'Suspend account' : 'Reactivate account'; ?></button>
+                                        </form>
                                         <?php foreach ($landlordBranches as $branch): ?>
                                             <form method="post" class="landlord-row-form landlord-branch-form">
                                                 <input type="hidden" name="csrf_token" value="<?= e($_SESSION['super_admin_landlords_csrf']); ?>">
