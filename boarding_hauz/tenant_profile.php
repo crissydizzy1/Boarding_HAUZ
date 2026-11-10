@@ -3,6 +3,11 @@
 require_once __DIR__ . '/auth.php';
 requireRole('tenant');
 
+if (empty($_SESSION['tenant_profile_csrf'])) {
+    $_SESSION['tenant_profile_csrf'] = bin2hex(random_bytes(32));
+}
+$tenantProfileCsrf = $_SESSION['tenant_profile_csrf'];
+
 $userId = (int) $_SESSION['user_id'];
 
 $successMessage = '';
@@ -48,11 +53,16 @@ if (!$tenant) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
 
+    $postedToken = is_string($_POST['csrf_token'] ?? null) ? $_POST['csrf_token'] : '';
     $fullName = trim($_POST['full_name'] ?? '');
     $contactNumber = trim($_POST['contact_number'] ?? '');
     $email = trim($_POST['email'] ?? '');
 
-    if ($fullName === '') {
+    if (!hash_equals($tenantProfileCsrf, $postedToken)) {
+
+        $errorMessage = 'Your session could not be verified. Refresh the page and try again.';
+
+    } elseif ($fullName === '') {
 
         $errorMessage = 'Full name is required.';
 
@@ -183,11 +193,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
 
+    $postedToken = is_string($_POST['csrf_token'] ?? null) ? $_POST['csrf_token'] : '';
     $currentPassword = $_POST['current_password'] ?? '';
     $newPassword = $_POST['new_password'] ?? '';
     $confirmPassword = $_POST['confirm_password'] ?? '';
 
-    if (
+    if (!hash_equals($tenantProfileCsrf, $postedToken)) {
+
+        $passwordError = 'Your session could not be verified. Refresh the page and try again.';
+
+    } elseif (
         $currentPassword === '' ||
         $newPassword === '' ||
         $confirmPassword === ''
@@ -978,6 +993,7 @@ include __DIR__ . '/includes/tenant_header.php';
 
 
                     <form method="POST">
+                        <input type="hidden" name="csrf_token" value="<?= e($tenantProfileCsrf) ?>">
 
                         <div class="profile-info-grid">
 
@@ -1123,6 +1139,7 @@ include __DIR__ . '/includes/tenant_header.php';
                     >
 
                         <form method="POST">
+                            <input type="hidden" name="csrf_token" value="<?= e($tenantProfileCsrf) ?>">
 
                             <div class="password-fields">
 

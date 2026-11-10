@@ -8,6 +8,46 @@
  */
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
+function loadDotEnvIfPresent(): void
+{
+    $dotenvPath = __DIR__ . '/../../.env';
+    if (!is_file($dotenvPath)) {
+        return;
+    }
+
+    $lines = @file($dotenvPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines === false) {
+        return;
+    }
+
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+        if ($trimmed === '' || str_starts_with($trimmed, '#')) {
+            continue;
+        }
+
+        $parts = explode('=', $trimmed, 2);
+        if (count($parts) !== 2) {
+            continue;
+        }
+
+        $key = trim($parts[0]);
+        $value = trim($parts[1]);
+        if ($key === '') {
+            continue;
+        }
+
+        $value = preg_replace('/^(["\'])?(.*)\1$/', '$2', $value);
+        if (!array_key_exists($key, $_ENV) && !array_key_exists($key, $_SERVER) && getenv($key) === false) {
+            putenv($key . '=' . $value);
+            $_ENV[$key] = $value;
+            $_SERVER[$key] = $value;
+        }
+    }
+}
+
+loadDotEnvIfPresent();
+
 $host = getenv('BOARDING_HAUZ_DB_HOST') ?: '127.0.0.1';
 $portValue = getenv('BOARDING_HAUZ_DB_PORT') ?: '3306';
 $port = ctype_digit((string) $portValue) ? (int) $portValue : 3306;
