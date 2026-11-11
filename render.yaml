@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: boarding-hauz
+    runtime: docker
+    region: oregon
+    plan: free
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /boarding_hauz/
+    autoDeploy: true
+    envVars:
+      - key: BOARDING_HAUZ_DB_HOST
+        sync: false
+      - key: BOARDING_HAUZ_DB_PORT
+        value: "3306"
+      - key: BOARDING_HAUZ_DB_NAME
+        value: boarding_hauz
+      - key: BOARDING_HAUZ_DB_USER
+        sync: false
+      - key: BOARDING_HAUZ_DB_PASSWORD
+        sync: false
+      - key: BOARDING_HAUZ_DB_SSL
+        value: "0"

@@ -59,6 +59,25 @@ docker run --rm -p 8080:80 --env-file .env boarding-hauz
 
 The PHP container does not create or migrate a MySQL database. Configure a separate MySQL/MariaDB service and set `BOARDING_HAUZ_DB_HOST` to a hostname reachable from the PHP container. Then open `http://localhost:8080/boarding_hauz/`.
 
+## Render deployment
+
+This repo includes a `render.yaml` so the app can be deployed as a Docker web service on Render.
+
+1. Push the repository to GitHub.
+2. In Render, click New > Web Service > Connect a repository.
+3. Select this repo and keep the default Docker settings.
+4. Set the database environment variables in the Render dashboard:
+   - `BOARDING_HAUZ_DB_HOST`
+   - `BOARDING_HAUZ_DB_PORT` (default `3306`)
+   - `BOARDING_HAUZ_DB_NAME`
+   - `BOARDING_HAUZ_DB_USER`
+   - `BOARDING_HAUZ_DB_PASSWORD`
+   - `BOARDING_HAUZ_DB_SSL` (`0` for local/insecure or `1` when using a TLS-enabled DB)
+5. Create or attach a MySQL database service and import the schema from `boarding_hauz/database/boarding_hauz_full.sql`.
+6. Deploy the service. The app will be served at the Render-generated URL, usually under `/boarding_hauz/`.
+
+Note: Render cannot directly access your GitHub or cloud credentials from this local environment, so the final live deployment must still be triggered from your Render account after pushing the repo.
+
 ## Uploads and room images
 
 - Static sample room photographs belong in `boarding_hauz/assets/images/rooms/`.
