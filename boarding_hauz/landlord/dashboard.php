@@ -5,9 +5,13 @@ requireRole('landlord');
 
 $admin_title = 'Dashboard';
 $user = currentUser();
-$branchId = currentBranchId();
+$branchId = requireSelectedBranch();
+$landlordId = (int) $_SESSION['user_id'];
 
 $adminName = $user['username'] ?? $_SESSION['user_name'] ?? 'Admin';
+if (empty($_SESSION['admin_rooms_csrf'])) {
+    $_SESSION['admin_rooms_csrf'] = bin2hex(random_bytes(32));
+}
 $totalRooms = 0;
 $availableRooms = 0;
 $occupiedRooms = 0;
@@ -17,14 +21,16 @@ $totalTenants = 0;
 $pendingPayments = 0;
 $pendingMaintenance = 0;
 $pendingRoomApplications = 0;
+$recentRoomApplications = [];
 $hasRoomRequestsTable = false;
+$roomRequestsError = false;
 $hasMaintenanceTable = false;
 $unreadPublicInquiries = 0;
 $recentPublicInquiries = [];
 $hasPublicInquiriesTable = true;
 
-$stmt = $conn->prepare('SELECT id, capacity, status FROM rooms WHERE (? IS NULL OR branch_id = ?)');
-$stmt->bind_param('ii', $branchId, $branchId);
+$stmt = $conn->prepare('SELECT id, room_number, room_type, capacity, monthly_rate, status FROM rooms WHERE branch_id = ? ORDER BY room_number, id');
+$stmt->bind_param('i', $branchId);
 $stmt->execute();
 $rooms = attachRoomOccupancy($conn, $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
 $stmt->close();
@@ -75,16 +81,51 @@ $hasRoomRequestsTable = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0)
 $stmt->close();
 
 if ($hasRoomRequestsTable) {
-    $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM room_requests rr INNER JOIN rooms r ON r.id = rr.room_id WHERE rr.status = 'Pending' AND (? IS NULL OR r.branch_id = ?)");
-    $stmt->bind_param('ii', $branchId, $branchId);
-    $stmt->execute();
-    $pendingRoomApplications = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
-    $stmt->close();
+    try {
+        $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM room_requests rr INNER JOIN rooms r ON r.id = rr.room_id WHERE rr.status = 'Pending' AND r.branch_id = ?");
+        $stmt->bind_param('i', $branchId);
+        $stmt->execute();
+        $pendingRoomApplications = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
+        $stmt->close();
+
+        $stmt = $conn->prepare("
+            SELECT
+                rr.id,
+                rr.status,
+                rr.created_at,
+                t.full_name,
+                t.contact_number,
+                u.email,
+                r.room_number,
+                r.room_type
+            FROM room_requests rr
+            INNER JOIN rooms r ON r.id = rr.room_id
+            INNER JOIN tenants t ON t.id = rr.tenant_id
+            LEFT JOIN users u ON u.id = t.user_id
+            WHERE r.branch_id = ?
+            ORDER BY
+                CASE WHEN rr.status = 'Pending' THEN 0 ELSE 1 END,
+                rr.created_at DESC,
+                rr.id DESC
+            LIMIT 5
+        ");
+        $stmt->bind_param('i', $branchId);
+        $stmt->execute();
+        $recentRoomApplications = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+    } catch (mysqli_sql_exception $exception) {
+        error_log('Landlord dashboard room applications failed: ' . $exception->getMessage());
+        $roomRequestsError = true;
+        $hasRoomRequestsTable = false;
+        $pendingRoomApplications = 0;
+        $recentRoomApplications = [];
+    }
 }
 
+$publicInquirySummaryError = false;
 try {
-    $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM public_inquiries WHERE status = 'Unread' AND (? IS NULL OR branch_id = ?)");
-    $stmt->bind_param('ii', $branchId, $branchId);
+    $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM public_inquiries WHERE status = 'Unread' AND inquiry_type = 'property' AND branch_id = ?");
+    $stmt->bind_param('i', $branchId);
     $stmt->execute();
     $unreadPublicInquiries = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
     $stmt->close();
@@ -92,17 +133,74 @@ try {
     $stmt = $conn->prepare("
         SELECT id, full_name, email, contact_number, preferred_room_type, status, created_at
         FROM public_inquiries
-        WHERE (? IS NULL OR branch_id = ?)
+        WHERE branch_id = ? AND inquiry_type = 'property'
         ORDER BY created_at DESC, id DESC
         LIMIT 5
     ");
-    $stmt->bind_param('ii', $branchId, $branchId);
+    $stmt->bind_param('i', $branchId);
     $stmt->execute();
     $recentPublicInquiries = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
 } catch (mysqli_sql_exception $exception) {
     error_log('Admin dashboard public inquiry summary failed: ' . $exception->getMessage());
+    $publicInquirySummaryError = true;
     $hasPublicInquiriesTable = false;
+}
+
+$activeInquiries = $unreadPublicInquiries + $pendingRoomApplications;
+$activeInquiriesAvailable = !$publicInquirySummaryError;
+$unreadMessages = 0;
+$recentConversations = [];
+$messageSummaryError = false;
+try {
+    $stmt = $conn->prepare("
+        SELECT COUNT(*) AS total
+        FROM messages m
+        INNER JOIN tenants t ON t.user_id = m.sender_id
+        WHERE m.receiver_id = ?
+          AND m.is_read = 0
+          AND t.branch_id = ?
+    ");
+    $stmt->bind_param('ii', $landlordId, $branchId);
+    $stmt->execute();
+    $unreadMessages = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
+    $stmt->close();
+
+    $stmt = $conn->prepare("
+        SELECT
+            u.id AS tenant_user_id,
+            t.full_name,
+            latest.message,
+            latest.sender_id,
+            latest.created_at,
+            (
+                SELECT COUNT(*)
+                FROM messages unread
+                WHERE unread.sender_id = u.id
+                  AND unread.receiver_id = ?
+                  AND unread.is_read = 0
+            ) AS unread_count
+        FROM tenants t
+        INNER JOIN users u ON u.id = t.user_id
+        INNER JOIN messages latest ON latest.id = (
+            SELECT m.id
+            FROM messages m
+            WHERE (m.sender_id = u.id AND m.receiver_id = ?)
+               OR (m.sender_id = ? AND m.receiver_id = u.id)
+            ORDER BY m.created_at DESC, m.id DESC
+            LIMIT 1
+        )
+        WHERE t.branch_id = ?
+        ORDER BY latest.created_at DESC, latest.id DESC
+        LIMIT 5
+    ");
+    $stmt->bind_param('iiii', $landlordId, $landlordId, $landlordId, $branchId);
+    $stmt->execute();
+    $recentConversations = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+} catch (mysqli_sql_exception $exception) {
+    error_log('Landlord dashboard messages summary failed: ' . $exception->getMessage());
+    $messageSummaryError = true;
 }
 
 $occupancyPercent = $totalCapacity > 0
@@ -147,7 +245,7 @@ include __DIR__ . '/../admin/admin_header.php';
 
     .admin-summary {
         display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 14px;
         margin-bottom: 24px;
     }
@@ -359,6 +457,181 @@ include __DIR__ . '/../admin/admin_header.php';
         line-height: 1.6;
     }
 
+    .dashboard-room-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 18px;
+    }
+
+    .dashboard-room-card,
+    .dashboard-feed-item {
+        min-width: 0;
+        padding: 15px;
+        border: 1px solid #d7e6ea;
+        border-radius: 8px;
+        background: #ffffff;
+    }
+
+    .dashboard-room-heading,
+    .dashboard-feed-heading {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+    }
+
+    .dashboard-room-heading h3,
+    .dashboard-feed-heading h3 {
+        margin: 0;
+        color: #0d1c1e;
+        font-family: 'Inter', sans-serif;
+        font-size: 15px;
+    }
+
+    .dashboard-room-type,
+    .dashboard-feed-meta {
+        margin-top: 4px;
+        color: #667b7e;
+        font-size: 11px;
+    }
+
+    .dashboard-room-status,
+    .dashboard-request-status,
+    .dashboard-unread-badge {
+        flex: 0 0 auto;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #e4f7ef;
+        color: #176b59;
+        font-size: 10px;
+        font-weight: 700;
+    }
+
+    .dashboard-room-status.fully-occupied,
+    .dashboard-request-status.rejected {
+        background: #fde5e5;
+        color: #a52b2b;
+    }
+
+    .dashboard-room-status.partially-occupied,
+    .dashboard-request-status.pending {
+        background: #fff4d8;
+        color: #806300;
+    }
+
+    .dashboard-room-status.maintenance {
+        background: #edf0f2;
+        color: #536466;
+    }
+
+    .dashboard-room-facts {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 14px;
+        color: #536466;
+        font-size: 11px;
+    }
+
+    .dashboard-room-facts strong {
+        display: block;
+        color: #0d1c1e;
+        font-size: 13px;
+    }
+
+    .dashboard-room-actions,
+    .dashboard-request-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+    }
+
+    .dashboard-room-actions a,
+    .dashboard-request-actions button {
+        padding: 7px 10px;
+        border: 1px solid #d7e6ea;
+        border-radius: 6px;
+        background: #ffffff;
+        color: #236b67;
+        font: 700 11px 'Inter', sans-serif;
+        text-decoration: none;
+        cursor: pointer;
+    }
+
+    .dashboard-room-actions a:hover,
+    .dashboard-request-actions button:hover {
+        border-color: #22b486;
+        background: #edf9fc;
+    }
+
+    .dashboard-workspace-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+    }
+
+    .dashboard-workspace-grid .admin-card {
+        min-width: 0;
+    }
+
+    .admin-card .section-header-row {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .dashboard-feed-list {
+        display: grid;
+        gap: 10px;
+        margin-top: 16px;
+    }
+
+    .dashboard-feed-item p {
+        margin: 9px 0 0;
+        overflow-wrap: anywhere;
+        color: #536466;
+        font-size: 12px;
+    }
+
+    .dashboard-request-actions form {
+        margin: 0;
+    }
+
+    .dashboard-request-actions .approve-button {
+        border-color: #22b486;
+        background: #22b486;
+        color: #ffffff;
+    }
+
+    .dashboard-request-actions .reject-button {
+        border-color: #f0d1d1;
+        color: #a52b2b;
+    }
+
+    .dashboard-message-link {
+        display: block;
+        color: inherit;
+        text-decoration: none;
+    }
+
+    .dashboard-message-link:hover h3 {
+        color: #236b67;
+    }
+
+    .dashboard-message-snippet {
+        display: block;
+        margin-top: 9px;
+        overflow-wrap: anywhere;
+        color: #536466;
+        font-size: 12px;
+    }
+
+    .dashboard-unread-badge {
+        background: #22b486;
+        color: #ffffff;
+    }
+
     .maintenance-note {
         margin: 10px 0 0;
         color: #667b7e;
@@ -368,6 +641,10 @@ include __DIR__ . '/../admin/admin_header.php';
 
     @media (max-width: 820px) {
         .admin-summary {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .dashboard-room-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
         }
     }
@@ -401,6 +678,11 @@ include __DIR__ . '/../admin/admin_header.php';
         .room-overview-item strong {
             font-size: 19px;
         }
+
+        .dashboard-room-grid,
+        .dashboard-workspace-grid {
+            grid-template-columns: 1fr;
+        }
     }
 </style>
 
@@ -409,7 +691,7 @@ include __DIR__ . '/../admin/admin_header.php';
     <!-- ============ HEADER ============ -->
     <section class="admin-page-header">
         <div>
-            <span class="admin-page-label">LANDLORD PORTAL</span>
+            <span class="admin-page-label"><?= hasRole('super_landlord') ? 'SUPER LANDLORD PORTAL' : 'LANDLORD PORTAL'; ?></span>
             <h1>Dashboard</h1>
             <p>Welcome, <?= e($adminName); ?>. Review current room, tenant, and payment records.</p>
         </div>
@@ -445,6 +727,32 @@ include __DIR__ . '/../admin/admin_header.php';
             <div class="admin-stat-value"><?= $pendingRoomApplications; ?></div>
             <div class="admin-stat-note"><?= $hasRoomRequestsTable ? 'Review room requests' : 'Apply room request migration'; ?></div>
         </a>
+
+        <a class="admin-stat" href="rooms.php" aria-label="Manage all <?= $totalRooms; ?> rooms">
+            <div class="admin-stat-label">Total Rooms</div>
+            <div class="admin-stat-value"><?= $totalRooms; ?></div>
+            <div class="admin-stat-note">Manage specs and room photos</div>
+        </a>
+
+        <a class="admin-stat" href="inquiries.php#public-inquiries" aria-label="<?= $activeInquiriesAvailable ? 'Review ' . $activeInquiries . ' active inquiries and applications' : 'Inquiry summary unavailable'; ?>">
+            <div class="admin-stat-label">Active Inquiries</div>
+            <div class="admin-stat-value"><?= $activeInquiriesAvailable ? $activeInquiries : '—'; ?></div>
+            <div class="admin-stat-note">
+                <?php if (!$activeInquiriesAvailable): ?>
+                    Inquiry summary unavailable; check the required database migrations
+                <?php elseif (!$hasRoomRequestsTable || $roomRequestsError): ?>
+                    <?= $unreadPublicInquiries; ?> unread · room application summary unavailable
+                <?php else: ?>
+                    <?= $unreadPublicInquiries; ?> unread · <?= $pendingRoomApplications; ?> applications pending
+                <?php endif; ?>
+            </div>
+        </a>
+
+        <a class="admin-stat" href="messages.php" aria-label="<?= $messageSummaryError ? 'Message summary unavailable' : 'Open messages with ' . $unreadMessages . ' unread messages'; ?>">
+            <div class="admin-stat-label">Unread Messages</div>
+            <div class="admin-stat-value"><?= $messageSummaryError ? '—' : $unreadMessages; ?></div>
+            <div class="admin-stat-note"><?= $messageSummaryError ? 'Message summary unavailable' : 'Open tenant conversations'; ?></div>
+        </a>
     </section>
 
     <section class="admin-card">
@@ -479,6 +787,137 @@ include __DIR__ . '/../admin/admin_header.php';
             <a href="tenants.php" class="admin-button admin-button-secondary">View Tenants</a>
         </div>
     </section>
+
+    <section class="admin-card" aria-labelledby="dashboard-rooms-heading">
+        <div class="section-header-row">
+            <div>
+                <h2 id="dashboard-rooms-heading">Rooms at a glance</h2>
+                <p class="admin-card-description">Capacity, occupancy, pricing, and shortcuts to room details and photo management.</p>
+            </div>
+            <a class="inquiry-action-link" href="rooms.php">Manage rooms</a>
+        </div>
+
+        <?php if (!$rooms): ?>
+            <p class="inquiry-empty">No rooms are registered for this branch yet.</p>
+        <?php else: ?>
+            <div class="dashboard-room-grid">
+                <?php foreach (array_slice($rooms, 0, 6) as $room): ?>
+                    <?php $roomStatusClass = strtolower(str_replace(' ', '-', (string) $room['occupancy_status'])); ?>
+                    <article class="dashboard-room-card">
+                        <div class="dashboard-room-heading">
+                            <div>
+                                <h3>Room <?= e($room['room_number']); ?></h3>
+                                <div class="dashboard-room-type"><?= e($room['room_type']); ?></div>
+                            </div>
+                            <span class="dashboard-room-status <?= e($roomStatusClass); ?>"><?= e($room['occupancy_status']); ?></span>
+                        </div>
+                        <div class="dashboard-room-facts">
+                            <div><strong><?= (int) $room['current_occupants']; ?>/<?= (int) $room['capacity']; ?></strong>Occupants / capacity</div>
+                            <div><strong>₱<?= number_format((float) $room['monthly_rate'], 2); ?></strong>Monthly rate</div>
+                        </div>
+                        <div class="dashboard-room-actions">
+                            <a href="/boarding_hauz/room-details.php?id=<?= (int) $room['id']; ?>&amp;branch_id=<?= $branchId; ?>">View details</a>
+                            <a href="rooms.php?edit=<?= (int) $room['id']; ?>">Edit / photos</a>
+                        </div>
+                    </article>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    </section>
+
+    <div class="dashboard-workspace-grid">
+        <section class="admin-card" id="room-applications" aria-labelledby="dashboard-applications-heading">
+            <div class="section-header-row">
+                <div>
+                    <h2 id="dashboard-applications-heading">Room inquiries &amp; applications</h2>
+                    <p class="admin-card-description">Review applicant contact details and approve or reject pending room applications.</p>
+                </div>
+                <a class="inquiry-action-link" href="rooms.php#room-applications">View all</a>
+            </div>
+
+            <?php if ($roomRequestsError): ?>
+                <p class="inquiry-empty">Room applications could not be loaded. Please try again later.</p>
+            <?php elseif (!$hasRoomRequestsTable): ?>
+                <p class="inquiry-empty">Room application tracking is unavailable. Apply the room requests database migration.</p>
+            <?php elseif (!$recentRoomApplications): ?>
+                <p class="inquiry-empty">No room applications have been submitted yet.</p>
+            <?php else: ?>
+                <div class="dashboard-feed-list">
+                    <?php foreach ($recentRoomApplications as $application): ?>
+                        <?php $applicationDate = strtotime($application['created_at']); ?>
+                        <article class="dashboard-feed-item">
+                            <div class="dashboard-feed-heading">
+                                <div>
+                                    <h3><?= e($application['full_name']); ?></h3>
+                                    <div class="dashboard-feed-meta">Room <?= e($application['room_number']); ?> · <?= e($application['room_type']); ?></div>
+                                </div>
+                                <span class="dashboard-request-status <?= strtolower(e($application['status'])); ?>"><?= e($application['status']); ?></span>
+                            </div>
+                            <p>
+                                <?= e($application['email'] ?: 'Email not provided'); ?>
+                                <?php if (!empty($application['contact_number'])): ?> · <?= e($application['contact_number']); ?><?php endif; ?>
+                            </p>
+                            <p class="dashboard-feed-meta"><?= $applicationDate ? e(date('M j, Y g:i A', $applicationDate)) : e($application['created_at']); ?></p>
+                            <?php if ($application['status'] === 'Pending'): ?>
+                                <div class="dashboard-request-actions">
+                                    <form method="post" action="/boarding_hauz/landlord/rooms.php#room-applications">
+                                        <input type="hidden" name="csrf_token" value="<?= e($_SESSION['admin_rooms_csrf']); ?>">
+                                        <input type="hidden" name="action" value="approve_room_request">
+                                        <input type="hidden" name="request_id" value="<?= (int) $application['id']; ?>">
+                                        <button class="approve-button" type="submit">Approve</button>
+                                    </form>
+                                    <form method="post" action="/boarding_hauz/landlord/rooms.php#room-applications">
+                                        <input type="hidden" name="csrf_token" value="<?= e($_SESSION['admin_rooms_csrf']); ?>">
+                                        <input type="hidden" name="action" value="reject_room_request">
+                                        <input type="hidden" name="request_id" value="<?= (int) $application['id']; ?>">
+                                        <button class="reject-button" type="submit">Reject</button>
+                                    </form>
+                                </div>
+                            <?php endif; ?>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </section>
+
+        <section class="admin-card" aria-labelledby="dashboard-messages-heading">
+            <div class="section-header-row">
+                <div>
+                    <h2 id="dashboard-messages-heading">Recent messages</h2>
+                    <p class="admin-card-description"><?= $unreadMessages; ?> unread message<?= $unreadMessages === 1 ? '' : 's'; ?> from tenants in this branch.</p>
+                </div>
+                <a class="inquiry-action-link" href="messages.php">Open inbox</a>
+            </div>
+
+            <?php if ($messageSummaryError): ?>
+                <p class="inquiry-empty">Messages are temporarily unavailable. Please open the inbox later.</p>
+            <?php elseif (!$recentConversations): ?>
+                <p class="inquiry-empty">No tenant conversations yet.</p>
+            <?php else: ?>
+                <div class="dashboard-feed-list">
+                    <?php foreach ($recentConversations as $conversation): ?>
+                        <?php
+                        $messageDate = strtotime($conversation['created_at']);
+                        $messagePreview = ((int) $conversation['sender_id'] === $landlordId ? 'You: ' : '')
+                            . mb_strimwidth((string) $conversation['message'], 0, 90, '…', 'UTF-8');
+                        ?>
+                        <a class="dashboard-feed-item dashboard-message-link" href="messages.php?tenant_id=<?= (int) $conversation['tenant_user_id']; ?>#tenant-messages">
+                            <div class="dashboard-feed-heading">
+                                <div>
+                                    <h3><?= e($conversation['full_name']); ?></h3>
+                                    <div class="dashboard-feed-meta"><?= $messageDate ? e(date('M j, Y g:i A', $messageDate)) : e($conversation['created_at']); ?></div>
+                                </div>
+                                <?php if ((int) $conversation['unread_count'] > 0): ?>
+                                    <span class="dashboard-unread-badge"><?= (int) $conversation['unread_count']; ?> unread</span>
+                                <?php endif; ?>
+                            </div>
+                            <span class="dashboard-message-snippet"><?= e($messagePreview); ?></span>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </section>
+    </div>
 
     <section class="admin-card">
         <h2>Recent Public Inquiries</h2>

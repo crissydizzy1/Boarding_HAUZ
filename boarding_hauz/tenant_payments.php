@@ -37,7 +37,7 @@ if ($tenant && !empty($tenant['branch_id'])) {
                    u.maya_account_name, u.maya_number,
                    u.bank_name, u.bank_account_name, u.bank_account_number
             FROM branches b
-            INNER JOIN users u ON u.id = b.landlord_id AND u.role = 'landlord'
+            INNER JOIN users u ON u.id = b.landlord_id AND u.role IN ('landlord', 'super_landlord')
             WHERE b.id = ?
             LIMIT 1
         ");

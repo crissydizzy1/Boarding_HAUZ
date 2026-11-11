@@ -27,7 +27,7 @@ try {
         SELECT b.id, b.branch_name, b.location
         FROM branches b
         INNER JOIN users u ON u.id = b.landlord_id
-        WHERE u.role IN ('landlord', 'admin') AND u.status = 'active'
+        WHERE u.role IN ('landlord', 'super_landlord', 'admin') AND u.status = 'active'
         ORDER BY b.branch_name, b.location, b.id
     ");
     $branchStmt->execute();
@@ -385,7 +385,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             min-height: 60px;
             align-items: center;
             justify-content: center;
-            gap: 3px;
+            flex-wrap: wrap;
+            gap: 3px 8px;
             margin: 0;
             padding: 12px 16px;
             color: #65736e;
@@ -505,6 +506,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="tenant-register-login">
                     <span>Already registered?</span>
                     <a class="tenant-register-link" href="login.php<?php echo $returnRoomPath !== null ? '?return_room=' . rawurlencode($returnRoomId) . '&return_branch=' . rawurlencode((string) $returnBranchId) : ''; ?>">Sign In</a>
+                    <span>Own a property?</span>
+                    <a class="tenant-register-link" href="register_landlord.php">Register as a Super Landlord</a>
                 </div>
             </section>
         </div>

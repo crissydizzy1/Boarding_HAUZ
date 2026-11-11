@@ -4,7 +4,7 @@
 USE boarding_hauz;
 
 ALTER TABLE users
-    MODIFY COLUMN role ENUM('admin', 'super_admin', 'landlord', 'tenant')
+    MODIFY COLUMN role ENUM('admin', 'super_admin', 'landlord', 'super_landlord', 'tenant')
         NOT NULL DEFAULT 'tenant',
     ADD COLUMN created_by INT NULL AFTER status,
     ADD INDEX idx_users_created_by (created_by);
@@ -50,7 +50,7 @@ SELECT u.id, CONCAT('Main Branch ', u.id), 'Update location'
 FROM users u
 LEFT JOIN branches b ON b.landlord_id = u.id
 WHERE b.id IS NULL
-  AND u.role IN ('admin', 'landlord')
+  AND u.role IN ('admin', 'landlord', 'super_landlord')
   AND (
       EXISTS (SELECT 1 FROM rooms r WHERE r.admin_id = u.id)
       OR EXISTS (SELECT 1 FROM tenants t WHERE t.admin_id = u.id)

@@ -64,6 +64,8 @@ if (isLoggedIn()) {
 $error = '';
 $email = '';
 $success = isset($_GET['registered']);
+$landlordRegistered = is_string($_GET['landlord_registered'] ?? null)
+    && $_GET['landlord_registered'] === '1';
 $sessionExpired = is_string($_GET['expired'] ?? null) && $_GET['expired'] === '1';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -134,7 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (in_array($user['role'], ['admin', 'super_admin'], true)) {
                 $destination = '/boarding_hauz/admin/platform_dashboard.php';
                 $branchId = null;
-            } elseif ($user['role'] === 'landlord') {
+            } elseif (in_array($user['role'], ['landlord', 'super_landlord'], true)) {
                 $landlordId = (int) $user['id'];
                 $branchStmt = $conn->prepare('SELECT id FROM branches WHERE landlord_id = ? ORDER BY id LIMIT 1');
                 $branchStmt->bind_param('i', $landlordId);
@@ -176,6 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['role'] = $user['role'] === 'admin' ? 'super_admin' : $user['role'];
                 $_SESSION['user_role'] = $_SESSION['role'];
                 $_SESSION['branch_id'] = $branchId;
+                $_SESSION['current_branch_id'] = $branchId;
                 if ($_SESSION['role'] === 'tenant') {
                     $_SESSION['tenant_login_time'] = time();
                     $_SESSION['tenant_last_activity'] = $_SESSION['tenant_login_time'];
@@ -422,6 +425,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             min-height: 60px;
             align-items: center;
             justify-content: center;
+            flex-wrap: wrap;
+            gap: 8px 18px;
             padding: 12px 16px;
             color: #65736e;
             font-size: 12px;
@@ -488,7 +493,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <h1 class="tenant-login-heading" id="tenant-login-title">WELCOME BACK!</h1>
                     <p class="tenant-login-intro">Sign in with your username or email. You will be taken to the dashboard for your account role.</p>
 
-                    <?php if ($loginFlash !== '' || $success || $error !== '' || $sessionExpired): ?>
+                    <?php if ($loginFlash !== '' || $success || $landlordRegistered || $error !== '' || $sessionExpired): ?>
                         <div class="tenant-login-alerts" aria-live="polite">
                             <?php if ($sessionExpired): ?>
                                 <div class="tenant-login-alert error" role="alert">Your session expired after reaching the 8-hour session limit. Please sign in again.</div>
@@ -498,6 +503,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <?php endif; ?>
                             <?php if ($success): ?>
                                 <div class="tenant-login-alert success" role="status">Registration received. You can log in after your selected property landlord approves your tenant account.</div>
+                            <?php endif; ?>
+                            <?php if ($landlordRegistered): ?>
+                                <div class="tenant-login-alert success" role="status">Your landlord account is active. Sign in to manage your property.</div>
                             <?php endif; ?>
                             <?php if ($error !== ''): ?>
                                 <div class="tenant-login-alert error" role="alert"><?php echo e($error); ?></div>
@@ -530,8 +538,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
 
                 <div class="tenant-login-register">
-                    Need a tenant account?
-                    <a class="tenant-register-link" href="register.php<?php echo $returnRoomPath !== null ? '?return_room=' . rawurlencode($returnRoomId) . '&return_branch=' . rawurlencode((string) $returnBranchId) : ''; ?>">Register Now</a>
+                    <span>Need a tenant account? <a class="tenant-register-link" href="register.php<?php echo $returnRoomPath !== null ? '?return_room=' . rawurlencode($returnRoomId) . '&return_branch=' . rawurlencode((string) $returnBranchId) : ''; ?>">Register</a></span>
+                    <span>Managing multiple properties? <a class="tenant-register-link" href="register_landlord.php">Register as a Super Landlord</a></span>
                 </div>
             </section>
         </div>

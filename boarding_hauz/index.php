@@ -16,7 +16,7 @@ try {
                b.branch_name
         FROM rooms r
         INNER JOIN branches b ON b.id = r.branch_id
-        INNER JOIN users u ON u.id = b.landlord_id AND u.role = 'landlord' AND u.status = 'active'
+        INNER JOIN users u ON u.id = b.landlord_id AND u.role IN ('landlord', 'super_landlord') AND u.status = 'active'
         ORDER BY r.room_number, r.id
         LIMIT 3
     ");
@@ -45,7 +45,7 @@ try {
                 THEN r.id
             END) AS available_rooms
         FROM branches b
-        INNER JOIN users u ON u.id = b.landlord_id AND u.role = 'landlord' AND u.status = 'active'
+        INNER JOIN users u ON u.id = b.landlord_id AND u.role IN ('landlord', 'super_landlord') AND u.status = 'active'
         LEFT JOIN rooms r ON r.branch_id = b.id
         LEFT JOIN (
             SELECT room_id, COUNT(*) AS active_occupants

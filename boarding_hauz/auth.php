@@ -41,7 +41,17 @@ function hasRole($roles): bool
     if ($role === 'admin') {
         $role = 'super_admin';
     }
-    return is_string($role) && in_array($role, $roles, true);
+    if (!is_string($role)) {
+        return false;
+    }
+
+    foreach ($roles as $requiredRole) {
+        if ($role === $requiredRole
+            || ($role === 'super_landlord' && $requiredRole === 'landlord')) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function redirectTo(string $path): never
@@ -56,8 +66,14 @@ function redirectTo(string $path): never
 
 function currentBranchId(): ?int
 {
-    $branchId = $_SESSION['branch_id'] ?? null;
+    $branchId = $_SESSION['current_branch_id'] ?? $_SESSION['branch_id'] ?? null;
     return is_numeric($branchId) && (int) $branchId > 0 ? (int) $branchId : null;
+}
+
+function isLandlordRole(?string $role = null): bool
+{
+    $role = $role ?? ($_SESSION['role'] ?? $_SESSION['user_role'] ?? '');
+    return in_array($role, ['landlord', 'super_landlord'], true);
 }
 
 function currentUser(): ?array
@@ -81,7 +97,7 @@ function dashboardPathForRole(?string $role = null): string
     if ($role === 'super_admin' || $role === 'admin') {
         return '/boarding_hauz/admin/platform_dashboard.php';
     }
-    if ($role === 'landlord') {
+    if (in_array($role, ['landlord', 'super_landlord'], true)) {
         return '/boarding_hauz/landlord/dashboard.php';
     }
     if ($role === 'tenant') {
@@ -157,7 +173,7 @@ function roomBranchId($roomId): ?int
         SELECT r.branch_id
         FROM rooms r
         INNER JOIN branches b ON b.id = r.branch_id
-        INNER JOIN users u ON u.id = b.landlord_id AND u.role = 'landlord' AND u.status = 'active'
+        INNER JOIN users u ON u.id = b.landlord_id AND u.role IN ('landlord', 'super_landlord') AND u.status = 'active'
         WHERE r.id = ?
         LIMIT 1
     ");
@@ -214,7 +230,7 @@ function requireRole($roles): void
         logOut();
     }
 
-    if ($sessionRole === 'landlord') {
+    if (isLandlordRole($sessionRole)) {
         $branchId = currentBranchId();
         if ($branchId === null) {
             http_response_code(403);

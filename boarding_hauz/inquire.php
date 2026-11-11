@@ -54,7 +54,7 @@ if ($roomError !== '') {
                    b.branch_name, b.location AS branch_location
             FROM rooms r
             INNER JOIN branches b ON b.id = r.branch_id
-            INNER JOIN users u ON u.id = b.landlord_id AND u.role = 'landlord' AND u.status = 'active'
+            INNER JOIN users u ON u.id = b.landlord_id AND u.role IN ('landlord', 'super_landlord') AND u.status = 'active'
             WHERE r.id = ?
             LIMIT 1
         ");

@@ -76,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     SET gcash_account_name = ?, gcash_number = ?,
                         maya_account_name = ?, maya_number = ?,
                         bank_name = ?, bank_account_name = ?, bank_account_number = ?
-                    WHERE id = ? AND role = 'landlord'
+                    WHERE id = ? AND role IN ('landlord', 'super_landlord')
                     LIMIT 1
                 ");
                 $stmt->bind_param(
@@ -203,7 +203,7 @@ try {
         SELECT gcash_account_name, gcash_number, maya_account_name, maya_number,
                bank_name, bank_account_name, bank_account_number
         FROM users
-        WHERE id = ? AND role = 'landlord'
+        WHERE id = ? AND role IN ('landlord', 'super_landlord')
         LIMIT 1
     ");
     $settingsStmt->bind_param('i', $adminId);

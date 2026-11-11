@@ -46,15 +46,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Enter a valid branch name and location.';
         } else {
             try {
-                $landlordRole = 'landlord';
                 $stmt = $conn->prepare("
                     SELECT b.id
                     FROM branches b
                     INNER JOIN users u ON u.id = b.landlord_id
-                    WHERE b.id = ? AND b.landlord_id = ? AND u.role = ?
+                    WHERE b.id = ? AND b.landlord_id = ? AND u.role IN ('landlord', 'super_landlord')
                     LIMIT 1
                 ");
-                $stmt->bind_param('iis', $targetBranchId, $targetLandlordId, $landlordRole);
+                $stmt->bind_param('ii', $targetBranchId, $targetLandlordId);
                 $stmt->execute();
                 $validBranch = (bool) $stmt->get_result()->fetch_assoc();
                 $stmt->close();
@@ -102,9 +101,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             try {
                 if ($action === 'update_landlord') {
-                    $stmt = $conn->prepare('SELECT id FROM users WHERE id = ? AND role = ? LIMIT 1');
-                    $landlordRole = 'landlord';
-                    $stmt->bind_param('is', $targetLandlordId, $landlordRole);
+                    $stmt = $conn->prepare("SELECT id FROM users WHERE id = ? AND role IN ('landlord', 'super_landlord') LIMIT 1");
+                    $stmt->bind_param('i', $targetLandlordId);
                     $stmt->execute();
                     $validLandlord = (bool) $stmt->get_result()->fetch_assoc();
                     $stmt->close();
@@ -118,11 +116,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if (!is_string($passwordHash)) {
                             throw new RuntimeException('The replacement password could not be secured.');
                         }
-                        $stmt = $conn->prepare('UPDATE users SET username = ?, email = ?, password = ? WHERE id = ? AND role = ? LIMIT 1');
-                        $stmt->bind_param('sssis', $username, $email, $passwordHash, $targetLandlordId, $landlordRole);
+                        $stmt = $conn->prepare("UPDATE users SET username = ?, email = ?, password = ? WHERE id = ? AND role IN ('landlord', 'super_landlord') LIMIT 1");
+                        $stmt->bind_param('sssi', $username, $email, $passwordHash, $targetLandlordId);
                     } else {
-                        $stmt = $conn->prepare('UPDATE users SET username = ?, email = ? WHERE id = ? AND role = ? LIMIT 1');
-                        $stmt->bind_param('ssis', $username, $email, $targetLandlordId, $landlordRole);
+                        $stmt = $conn->prepare("UPDATE users SET username = ?, email = ? WHERE id = ? AND role IN ('landlord', 'super_landlord') LIMIT 1");
+                        $stmt->bind_param('ssi', $username, $email, $targetLandlordId);
                     }
                     $stmt->execute();
                     $stmt->close();
@@ -132,9 +130,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $conn->begin_transaction();
-                $stmt = $conn->prepare('UPDATE users SET status = ? WHERE id = ? AND role = ? LIMIT 1');
-                $landlordRole = 'landlord';
-                $stmt->bind_param('sis', $status, $targetLandlordId, $landlordRole);
+                $stmt = $conn->prepare("UPDATE users SET status = ? WHERE id = ? AND role IN ('landlord', 'super_landlord') LIMIT 1");
+                $stmt->bind_param('si', $status, $targetLandlordId);
                 $stmt->execute();
                 if ($stmt->affected_rows !== 1) {
                     $stmt->close();
@@ -165,7 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Choose a landlord and enter a valid branch name and location.';
         } else {
             try {
-                $stmt = $conn->prepare("SELECT id FROM users WHERE id = ? AND role = 'landlord' AND status = 'active' LIMIT 1");
+                $stmt = $conn->prepare("SELECT id FROM users WHERE id = ? AND role IN ('landlord', 'super_landlord') AND status = 'active' LIMIT 1");
                 $stmt->bind_param('i', $targetLandlordId);
                 $stmt->execute();
                 $validLandlord = (bool) $stmt->get_result()->fetch_assoc();
@@ -258,7 +255,7 @@ $landlordSearchParameter = $landlordSearch;
 $landlordCountStmt = $conn->prepare("
     SELECT COUNT(*) AS total
     FROM users u
-    WHERE u.role = 'landlord'
+    WHERE u.role IN ('landlord', 'super_landlord')
       AND (? = '' OR u.status = ?)
       AND (
           ? = '' OR u.username LIKE ? OR u.email LIKE ?
@@ -287,9 +284,9 @@ $page = min($requestedPage, $totalPages);
 $offset = ($page - 1) * $pageSize;
 $landlords = [];
 $stmt = $conn->prepare("
-    SELECT u.id, u.username, u.email, u.status, u.created_at
+    SELECT u.id, u.username, u.email, u.role, u.status, u.created_at
     FROM users u
-    WHERE u.role = 'landlord'
+    WHERE u.role IN ('landlord', 'super_landlord')
       AND (? = '' OR u.status = ?)
       AND (
           ? = '' OR u.username LIKE ? OR u.email LIKE ?
@@ -340,7 +337,7 @@ if ($landlords) {
     $branchStmt->close();
 }
 $landlordAccounts = [];
-$stmt = $conn->prepare("SELECT id, username, email FROM users WHERE role = 'landlord' AND status = 'active' ORDER BY username, id");
+$stmt = $conn->prepare("SELECT id, username, email FROM users WHERE role IN ('landlord', 'super_landlord') AND status = 'active' ORDER BY username, id");
 $stmt->execute();
 $landlordAccounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
@@ -415,7 +412,7 @@ include __DIR__ . '/admin_header.php';
         <?php else: ?>
             <div class="landlord-table-wrap">
                 <table class="landlord-table">
-                    <thead><tr><th>Username and email</th><th>Status</th><th>Branches and locations</th><th>Created</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>Username and email</th><th>Role</th><th>Status</th><th>Branches and locations</th><th>Created</th><th>Actions</th></tr></thead>
                     <tbody>
                     <?php foreach ($landlords as $landlord): ?>
                         <?php $landlordBranches = $branchesByLandlord[(int) $landlord['id']] ?? []; ?>
@@ -424,6 +421,7 @@ include __DIR__ . '/admin_header.php';
                                 <strong><?= e($landlord['username']); ?></strong>
                                 <span class="landlord-email"><?= e($landlord['email']); ?></span>
                             </td>
+                            <td><?= $landlord['role'] === 'super_landlord' ? 'Super Landlord' : 'Landlord'; ?></td>
                             <td>
                                 <span class="landlord-status <?= $landlord['status'] === 'active' ? 'is-active' : ($landlord['status'] === 'inactive' ? 'is-suspended' : 'is-pending'); ?>">
                                     <?= e($landlord['status'] === 'inactive' ? 'Suspended' : ucfirst($landlord['status'])); ?>

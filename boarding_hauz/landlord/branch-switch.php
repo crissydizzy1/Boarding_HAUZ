@@ -28,5 +28,6 @@ if (!$branch) {
 }
 
 $_SESSION['branch_id'] = $branchId;
+$_SESSION['current_branch_id'] = $branchId;
 $_SESSION['branch_switch_csrf'] = bin2hex(random_bytes(32));
 redirectTo(dashboardPathForRole());

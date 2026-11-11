@@ -22,7 +22,7 @@ try {
             SUM(status = 'active') AS active,
             SUM(status = 'inactive') AS inactive
         FROM users
-        WHERE role = 'landlord'
+        WHERE role IN ('landlord', 'super_landlord')
     ");
     $stmt->execute();
     $landlordCounts = $stmt->get_result()->fetch_assoc() ?: $landlordCounts;

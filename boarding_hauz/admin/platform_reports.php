@@ -13,7 +13,7 @@ try {
     $stmt = $conn->prepare("
         SELECT DATE_FORMAT(created_at, '%Y-%m') AS month_key, COUNT(*) AS total
         FROM users
-        WHERE role = 'landlord'
+        WHERE role IN ('landlord', 'super_landlord')
           AND created_at >= DATE_FORMAT(DATE_SUB(CURRENT_DATE, INTERVAL 5 MONTH), '%Y-%m-01')
         GROUP BY DATE_FORMAT(created_at, '%Y-%m')
         ORDER BY month_key

@@ -13,7 +13,7 @@ $admin_name = $admin_user['username'] ?? ($_SESSION['user_name'] ?? 'Admin');
 $admin_branches = [];
 if (hasRole('landlord')) {
     $adminLandlordId = (int) $_SESSION['user_id'];
-    $stmt = $conn->prepare('SELECT id, branch_name FROM branches WHERE landlord_id = ? ORDER BY branch_name, id');
+    $stmt = $conn->prepare('SELECT id, branch_name, location FROM branches WHERE landlord_id = ? ORDER BY branch_name, location, id');
     $stmt->bind_param('i', $adminLandlordId);
     $stmt->execute();
     $admin_branches = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -240,10 +240,10 @@ if (hasRole('landlord')) {
                 <form method="post" action="/boarding_hauz/landlord/branch-switch.php" class="admin-branch-switch">
                     <input type="hidden" name="csrf_token" value="<?php echo e($_SESSION['branch_switch_csrf']); ?>">
                     <label class="visually-hidden" for="admin-branch-select">Active branch</label>
-                    <select id="admin-branch-select" name="branch_id">
+                    <select id="admin-branch-select" name="branch_id" onchange="this.form.submit()">
                         <?php foreach ($admin_branches as $branch): ?>
                             <option value="<?php echo (int) $branch['id']; ?>" <?php echo currentBranchId() === (int) $branch['id'] ? 'selected' : ''; ?>>
-                                <?php echo e($branch['branch_name']); ?>
+                                <?php echo e($branch['branch_name'] . ' — ' . $branch['location']); ?>
                             </option>
                         <?php endforeach; ?>
                     </select>

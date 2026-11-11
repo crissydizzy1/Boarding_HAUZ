@@ -58,7 +58,7 @@ try {
         SELECT b.id, b.branch_name, b.location
         FROM branches b
         INNER JOIN users u ON u.id = b.landlord_id
-        WHERE u.role = 'landlord' AND u.status = 'active'
+        WHERE u.role IN ('landlord', 'super_landlord') AND u.status = 'active'
         ORDER BY b.branch_name, b.location, b.id
     ");
     $inquiryBranches = $branchResult->fetch_all(MYSQLI_ASSOC);

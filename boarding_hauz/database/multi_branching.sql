@@ -4,13 +4,13 @@
 -- Ensure the public_inquiries and maintenance_requests tables have already been installed.
 
 ALTER TABLE users
-    MODIFY COLUMN role ENUM('admin', 'super_admin', 'landlord', 'tenant')
+    MODIFY COLUMN role ENUM('admin', 'super_admin', 'landlord', 'super_landlord', 'tenant')
         NOT NULL DEFAULT 'tenant';
 
 UPDATE users SET role = 'landlord' WHERE role = 'admin';
 
 ALTER TABLE users
-    MODIFY COLUMN role ENUM('super_admin', 'landlord', 'tenant')
+    MODIFY COLUMN role ENUM('super_admin', 'landlord', 'super_landlord', 'tenant')
         NOT NULL DEFAULT 'tenant';
 
 CREATE TABLE branches (

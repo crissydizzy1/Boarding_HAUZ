@@ -24,7 +24,7 @@ $adminStmt = $conn->prepare("
     FROM users u
     INNER JOIN branches b ON b.landlord_id = u.id
     INNER JOIN tenants t ON t.branch_id = b.id
-    WHERE t.user_id = ? AND u.role = 'landlord'
+    WHERE t.user_id = ? AND u.role IN ('landlord', 'super_landlord')
     ORDER BY b.id
     LIMIT 1
 ");

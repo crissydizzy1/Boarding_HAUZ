@@ -33,7 +33,7 @@ $hasAuthenticatedUser = isset($_SESSION['user_id']) && (int) $_SESSION['user_id'
         </nav>
 
         <div class="header-actions">
-            <?php if ($hasAuthenticatedUser && in_array($sessionRole, ['admin', 'super_admin', 'landlord'], true)): ?>
+            <?php if ($hasAuthenticatedUser && in_array($sessionRole, ['admin', 'super_admin', 'landlord', 'super_landlord'], true)): ?>
                 <a href="<?= e(dashboardPathForRole()); ?>" class="btn btn-outline"><?= hasRole('landlord') ? 'Landlord Dashboard' : 'Admin Dashboard'; ?></a>
                 <a href="/boarding_hauz/logout.php" class="btn btn-primary">Logout</a>
             <?php elseif ($hasAuthenticatedUser && $sessionRole === 'tenant'): ?>

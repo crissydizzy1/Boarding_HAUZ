@@ -48,7 +48,7 @@ try {
     $masterId = 0;
     foreach ($conflicts as $account) {
         if ($account['username'] === $masterUsername && $account['email'] === $masterEmail
-            && $account['role'] === 'landlord') {
+            && in_array($account['role'], ['landlord', 'super_landlord'], true)) {
             if ($masterId !== 0) {
                 throw new RuntimeException('More than one account matches the master identity.');
             }
@@ -62,11 +62,11 @@ try {
     if (!is_string($passwordHash)) {
         throw new RuntimeException('The master password could not be hashed.');
     }
-    $landlordRole = 'landlord';
+    $landlordRole = 'super_landlord';
     $activeStatus = 'active';
     if ($masterId > 0) {
-        $stmt = $conn->prepare('UPDATE users SET password = ?, status = ? WHERE id = ? AND role = ?');
-        $stmt->bind_param('ssis', $passwordHash, $activeStatus, $masterId, $landlordRole);
+        $stmt = $conn->prepare("UPDATE users SET password = ?, status = ?, role = ? WHERE id = ? AND role IN ('landlord', 'super_landlord')");
+        $stmt->bind_param('sssi', $passwordHash, $activeStatus, $landlordRole, $masterId);
         $stmt->execute();
         $stmt->close();
     } else {
@@ -124,7 +124,7 @@ try {
     $stmt->execute();
     $stmt->close();
 
-    $stmt = $conn->prepare("SELECT id FROM users WHERE role = 'landlord' AND id <> ? FOR UPDATE");
+    $stmt = $conn->prepare("SELECT id FROM users WHERE role IN ('landlord', 'super_landlord') AND id <> ? FOR UPDATE");
     $stmt->bind_param('i', $masterId);
     $stmt->execute();
     $oldLandlordIds = array_map(
@@ -153,7 +153,7 @@ try {
             $stmt->execute();
             $stmt->close();
 
-            $stmt = $conn->prepare("DELETE FROM users WHERE id = ? AND role = 'landlord'");
+            $stmt = $conn->prepare("DELETE FROM users WHERE id = ? AND role IN ('landlord', 'super_landlord')");
             $stmt->bind_param('i', $oldLandlordId);
             $stmt->execute();
             $deletedAccounts += $stmt->affected_rows;
