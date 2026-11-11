@@ -22,6 +22,7 @@ if (isLoggedIn()) {
 
 $errors = [];
 $availableBranches = [];
+$branchLookupError = false;
 try {
     $branchStmt = $conn->prepare("
         SELECT b.id, b.branch_name, b.location
@@ -35,7 +36,7 @@ try {
     $branchStmt->close();
 } catch (mysqli_sql_exception $exception) {
     error_log('Tenant registration could not load available branches: ' . $exception->getMessage());
-    $errors[] = 'Tenant registration is temporarily unavailable because property data is not ready. Please contact the system administrator.';
+    $branchLookupError = true;
 }
 
 if (empty($_SESSION['tenant_register_csrf'])) {
@@ -91,15 +92,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
-    if (!$selectedBranch) {
-        $errors[] = $availableBranches
-            ? 'Choose a valid property to manage your registration.'
-            : 'Tenant registration is temporarily unavailable because no properties are accepting applications.';
+    if ($form['branch_id'] !== '' && !$selectedBranch) {
+        $errors[] = 'Choose a valid property, or leave the property field blank to browse first.';
     }
     if ($password === '') {
         $errors[] = 'Password is required.';
     } elseif (strlen($password) < 8) {
         $errors[] = 'Password must be at least 8 characters long.';
+    } elseif (strlen($password) > 72) {
+        $errors[] = 'Password must not exceed 72 bytes.';
     }
     if ($password !== $confirmPassword) {
         $errors[] = 'Passwords do not match.';
@@ -128,25 +129,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newUserId = (int) $conn->insert_id;
                 $stmt->close();
 
+                $branchId = $selectedBranch ? (int) $selectedBranch['id'] : null;
+                $tenantContactNumber = $form['contact_number'] === '' ? null : $form['contact_number'];
+                $tenantStatus = $selectedBranch ? 'pending' : 'active';
+                $conn->begin_transaction();
                 try {
-                    $branchId = (int) $selectedBranch['id'];
-                    $tenantContactNumber = $form['contact_number'] === '' ? null : $form['contact_number'];
-                    $tenantStatus = 'pending';
-                    $tenantStmt = $conn->prepare("
-                        INSERT INTO tenants (branch_id, user_id, full_name, contact_number, status)
-                        VALUES (?, ?, ?, ?, ?)
-                    ");
-                    $tenantStmt->bind_param(
-                        'iisss',
-                        $branchId,
-                        $newUserId,
-                        $form['full_name'],
-                        $tenantContactNumber,
-                        $tenantStatus
-                    );
+                    if ($branchId === null) {
+                        $tenantStmt = $conn->prepare("
+                            INSERT INTO tenants (branch_id, user_id, full_name, contact_number, status)
+                            VALUES (NULL, ?, ?, ?, ?)
+                        ");
+                        $tenantStmt->bind_param(
+                            'isss',
+                            $newUserId,
+                            $form['full_name'],
+                            $tenantContactNumber,
+                            $tenantStatus
+                        );
+                    } else {
+                        $tenantStmt = $conn->prepare("
+                            INSERT INTO tenants (branch_id, user_id, full_name, contact_number, status)
+                            VALUES (?, ?, ?, ?, ?)
+                        ");
+                        $tenantStmt->bind_param(
+                            'iisss',
+                            $branchId,
+                            $newUserId,
+                            $form['full_name'],
+                            $tenantContactNumber,
+                            $tenantStatus
+                        );
+                    }
                     $tenantStmt->execute();
                     $tenantStmt->close();
+                    $conn->commit();
                 } catch (mysqli_sql_exception $tenantException) {
+                    $conn->rollback();
                     try {
                         $cleanupStmt = $conn->prepare('DELETE FROM users WHERE id = ? LIMIT 1');
                         $cleanupStmt->bind_param('i', $newUserId);
@@ -160,7 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 redirectTo('/boarding_hauz/login.php?registered=1' . ($returnRoomPath !== null
                     ? '&return_room=' . rawurlencode($returnRoomId) . '&return_branch=' . rawurlencode((string) $returnBranchId)
-                    : ''));
+                    : '') . ($branchId === null ? '&unassigned=1' : ''));
             }
         } catch (RuntimeException $exception) {
             $errors[] = $exception->getMessage();
@@ -445,7 +463,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </span>
                     </div>
                     <h1 id="tenant-register-title">Create Tenant Account</h1>
-                    <p class="tenant-register-intro">Choose a property so its landlord can review your tenant registration.</p>
+                    <p class="tenant-register-intro">Create your tenant account to browse rooms and send inquiries. You can choose a property now or later.</p>
 
                     <?php if ($errors): ?>
                         <div class="tenant-register-alert" role="alert" aria-live="polite">
@@ -478,26 +496,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <input id="email" name="email" type="email" maxlength="255" value="<?php echo e($form['email']); ?>" autocomplete="email" required>
                         </div>
                         <div class="tenant-register-field">
-                            <label for="branch_id">Property / Landlord</label>
-                            <select id="branch_id" name="branch_id" required <?php echo !$availableBranches ? 'disabled' : ''; ?>>
-                                <option value="">Choose a property</option>
+                            <label for="branch_id">Property / Landlord <span>(optional)</span></label>
+                            <select id="branch_id" name="branch_id">
+                                <option value="">I’ll browse properties first</option>
                                 <?php foreach ($availableBranches as $availableBranch): ?>
                                     <option value="<?php echo (int) $availableBranch['id']; ?>" <?php echo $form['branch_id'] === (string) $availableBranch['id'] ? 'selected' : ''; ?>>
                                         <?php echo e($availableBranch['branch_name'] . ' — ' . $availableBranch['location']); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
-                            <?php if (!$availableBranches): ?>
-                                <span>No properties are currently accepting tenant registrations.</span>
+                            <?php if ($branchLookupError): ?>
+                                <span>Property listings are temporarily unavailable, but you can still create an account and browse later.</span>
+                            <?php elseif (!$availableBranches): ?>
+                                <span>No properties are listed yet. You can still create an account and browse later.</span>
                             <?php endif; ?>
                         </div>
                         <div class="tenant-register-field">
                             <label for="password">Password</label>
-                            <input id="password" name="password" type="password" minlength="8" autocomplete="new-password" required>
+                            <input id="password" name="password" type="password" minlength="8" maxlength="72" autocomplete="new-password" required>
                         </div>
                         <div class="tenant-register-field">
                             <label for="confirm_password">Confirm Password</label>
-                            <input id="confirm_password" name="confirm_password" type="password" minlength="8" autocomplete="new-password" required>
+                            <input id="confirm_password" name="confirm_password" type="password" minlength="8" maxlength="72" autocomplete="new-password" required>
                         </div>
                         <button class="tenant-register-submit" type="submit">REGISTER AS TENANT</button>
                     </form>

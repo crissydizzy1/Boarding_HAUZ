@@ -590,7 +590,7 @@ h1, h2, h3, h4 { font-family: var(--font-heading); font-weight: 700; line-height
 .rooms-empty-message { margin: 1.5rem 0; padding: 1.2rem; border: 1px solid #d6e5e7; border-radius: 10px; background: #fff; color: #49666a; text-align: center; }
 .rooms-empty-message a { color: #087f67; font-weight: 600; }
 @media (min-width: 961px) {
-    .rooms-search-field { align-self: flex-start; margin-top: .5rem; }
+    .rooms-search-field { align-self: flex-start; margin-top: 1.75rem; }
 }
 @media (max-width: 960px) {
     .rooms-filter-panel { align-items: stretch; flex-direction: column; }

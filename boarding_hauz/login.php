@@ -64,6 +64,8 @@ if (isLoggedIn()) {
 $error = '';
 $email = '';
 $success = isset($_GET['registered']);
+$unassignedTenantRegistered = is_string($_GET['unassigned'] ?? null)
+    && $_GET['unassigned'] === '1';
 $landlordRegistered = is_string($_GET['landlord_registered'] ?? null)
     && $_GET['landlord_registered'] === '1';
 $sessionExpired = is_string($_GET['expired'] ?? null) && $_GET['expired'] === '1';
@@ -159,10 +161,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = 'Your tenant registration is awaiting approval from the selected property landlord.';
                 } elseif ($user['tenant_status'] !== 'active') {
                     $error = 'This tenant account is not active. Contact the property landlord.';
-                } elseif (empty($user['branch_id'])) {
-                    $error = 'No property is assigned to this tenant account. Contact the property landlord.';
                 } else {
-                    $branchId = (int) $user['branch_id'];
+                    $branchId = !empty($user['branch_id']) ? (int) $user['branch_id'] : null;
                     $destination = $safeRedirectPath ?? $returnRoomPath ?? '/boarding_hauz/tenant_dashboard.php';
                 }
             } else {
@@ -493,7 +493,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <h1 class="tenant-login-heading" id="tenant-login-title">WELCOME BACK!</h1>
                     <p class="tenant-login-intro">Sign in with your username or email. You will be taken to the dashboard for your account role.</p>
 
-                    <?php if ($loginFlash !== '' || $success || $landlordRegistered || $error !== '' || $sessionExpired): ?>
+                    <?php if ($loginFlash !== '' || $success || $unassignedTenantRegistered || $landlordRegistered || $error !== '' || $sessionExpired): ?>
                         <div class="tenant-login-alerts" aria-live="polite">
                             <?php if ($sessionExpired): ?>
                                 <div class="tenant-login-alert error" role="alert">Your session expired after reaching the 8-hour session limit. Please sign in again.</div>
@@ -501,7 +501,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <?php if ($loginFlash !== ''): ?>
                                 <div class="tenant-login-alert error" role="alert"><?php echo e($loginFlash); ?></div>
                             <?php endif; ?>
-                            <?php if ($success): ?>
+                            <?php if ($success && $unassignedTenantRegistered): ?>
+                                <div class="tenant-login-alert success" role="status">Your tenant account is ready. Sign in to browse rooms and send an inquiry, then choose a property when you find one.</div>
+                            <?php elseif ($success): ?>
                                 <div class="tenant-login-alert success" role="status">Registration received. You can log in after your selected property landlord approves your tenant account.</div>
                             <?php endif; ?>
                             <?php if ($landlordRegistered): ?>
