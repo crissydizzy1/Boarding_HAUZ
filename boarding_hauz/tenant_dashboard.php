@@ -1541,7 +1541,7 @@ if ($currentPaymentDue) {
 }
 
 body.tenant-portal {
-    background: #c1f6ed;
+    background: #ffffff;
     color: #02353c;
     font-family: 'Inter', sans-serif;
 }
@@ -2433,11 +2433,7 @@ body.tenant-portal {
 }
 
 body.tenant-portal {
-    background-color: #c1f6ed;
-    background-image:
-        radial-gradient(ellipse at 12% 18%, rgba(255, 255, 255, .72), transparent 34%),
-        radial-gradient(ellipse at 88% 48%, rgba(63, 208, 201, .18), transparent 32%),
-        repeating-linear-gradient(135deg, transparent 0 118px, rgba(2, 53, 60, .025) 119px 120px);
+    background: #ffffff;
     color: #02353c;
 }
 
