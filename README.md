@@ -54,7 +54,7 @@ docker build -t boarding-hauz .
 Run it with database settings supplied through a local environment file:
 
 ```bash
-docker run --rm -p 8080:80 --env-file .env boarding-hauz
+docker run --rm -p 8080:10000 --env-file .env boarding-hauz
 ```
 
 The PHP container does not create or migrate a MySQL database. Configure a separate MySQL/MariaDB service and set `BOARDING_HAUZ_DB_HOST` to a hostname reachable from the PHP container. Then open `http://localhost:8080/boarding_hauz/`.
@@ -73,16 +73,19 @@ This repo includes a `render.yaml` so the app can be deployed as a Docker web se
    - `BOARDING_HAUZ_DB_USER`
    - `BOARDING_HAUZ_DB_PASSWORD`
    - `BOARDING_HAUZ_DB_SSL` (`0` for local/insecure or `1` when using a TLS-enabled DB)
-5. Create or attach a MySQL database service and import the schema from `boarding_hauz/database/boarding_hauz_full.sql`.
+5. Configure a reachable MySQL/MariaDB database with your database provider and import the schema from `boarding_hauz/database/boarding_hauz_full.sql`. Set `BOARDING_HAUZ_DB_SSL=1` if that provider requires TLS.
 6. Deploy the service. The app will be served at the Render-generated URL, usually under `/boarding_hauz/`.
 
-Note: Render cannot directly access your GitHub or cloud credentials from this local environment, so the final live deployment must still be triggered from your Render account after pushing the repo.
+The deployment uses the repository's `Dockerfile` and `render.yaml`; a Node `server.js` is not used because the application runs on PHP. Keep the whole repository together when deploying so the Docker build can copy `boarding_hauz/` and Render can find the deployment configuration.
+
+Note: The final live deployment must be triggered from your Render account after pushing the repo.
 
 ## Uploads and room images
 
 - Static sample room photographs belong in `boarding_hauz/assets/images/rooms/`.
 - Dynamic room uploads are stored under `boarding_hauz/uploads/rooms/` by the current application.
 - Payment-proof uploads are stored under `boarding_hauz/uploads/payment-proofs/`.
+- The container makes these upload directories writable by Apache. Container-local uploads are not durable across redeploys; configure persistent storage or external object storage before relying on them in production.
 - The supplied upload access-control files are retained. For production, prefer storing private payment proofs outside the public web root and enforce equivalent upload restrictions in the web server.
 - `.gitignore` retains the current demo upload files but ignores newly generated runtime uploads by default. Do not commit real tenant payment proofs, private documents, or other personal data.
 

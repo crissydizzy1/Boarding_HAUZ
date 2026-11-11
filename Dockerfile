@@ -9,6 +9,11 @@ RUN apt-get update \
 # Copy your application files into the boarding_hauz subfolder
 COPY boarding_hauz/ /var/www/html/boarding_hauz/
 
+# Allow Apache to store runtime uploads without making application code writable.
+RUN mkdir -p /var/www/html/boarding_hauz/uploads/rooms \
+    /var/www/html/boarding_hauz/uploads/payment-proofs \
+    && chown -R www-data:www-data /var/www/html/boarding_hauz/uploads
+
 # Configure Apache to listen on port 10000 (Required by Render)
 RUN sed -i 's/80/10000/g' /etc/apache2/ports.conf /etc/apache2/sites-available/000-default.conf
 
