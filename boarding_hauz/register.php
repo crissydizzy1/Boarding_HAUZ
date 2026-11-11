@@ -196,7 +196,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create Tenant Account | Boarding Hauz</title>
+    <title>Create Account | Boarding Hauz</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
@@ -452,7 +452,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <main class="tenant-register-shell">
         <div class="tenant-register-topbar">
             <a class="tenant-register-back" href="/boarding_hauz/index.php">← Back to Home</a>
-            <span class="tenant-register-portal"><span class="tenant-register-dot" aria-hidden="true"></span>Tenant Portal</span>
+            <span class="tenant-register-portal"><span class="tenant-register-dot" aria-hidden="true"></span>Account Portal</span>
         </div>
         <div class="tenant-register-content">
             <section class="tenant-register-card" aria-labelledby="tenant-register-title">
@@ -462,8 +462,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <img src="/boarding_hauz/assets/images/boarding-hauz-icon.png" alt="Boarding Hauz">
                         </span>
                     </div>
-                    <h1 id="tenant-register-title">Create Tenant Account</h1>
-                    <p class="tenant-register-intro">Create your tenant account to browse rooms and send inquiries. You can choose a property now or later.</p>
+                    <h1 id="tenant-register-title">Create Account</h1>
+                    <p class="tenant-register-intro">Create your account to browse rooms and send inquiries. You can choose a property now or later.</p>
 
                     <?php if ($errors): ?>
                         <div class="tenant-register-alert" role="alert" aria-live="polite">
@@ -519,7 +519,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <label for="confirm_password">Confirm Password</label>
                             <input id="confirm_password" name="confirm_password" type="password" minlength="8" maxlength="72" autocomplete="new-password" required>
                         </div>
-                        <button class="tenant-register-submit" type="submit">REGISTER AS TENANT</button>
+                        <button class="tenant-register-submit" type="submit">CREATE ACCOUNT</button>
                     </form>
                 </div>
 
