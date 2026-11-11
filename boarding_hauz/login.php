@@ -197,6 +197,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/boarding_hauz/assets/css/style.css?v=<?php echo (int) filemtime(__DIR__ . '/assets/css/style.css'); ?>">
     <style>
         body.tenant-login-page {
@@ -411,6 +412,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 10px;
         }
 
+        .tenant-login-security .material-symbols-outlined {
+            font-size: 16px;
+            line-height: 1;
+        }
+
         .tenant-login-register {
             display: flex;
             min-height: 60px;
@@ -520,7 +526,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <button class="tenant-login-submit" type="submit">LOGIN <span aria-hidden="true">→</span></button>
                     </form>
 
-                    <p class="tenant-login-security"><span aria-hidden="true">🔒</span> Secure role-based session</p>
+                    <p class="tenant-login-security"><span class="material-symbols-outlined" aria-hidden="true">lock</span> Secure role-based session</p>
                 </div>
 
                 <div class="tenant-login-register">

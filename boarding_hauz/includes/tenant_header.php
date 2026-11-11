@@ -31,6 +31,7 @@ if (isset($conn) && !empty($_SESSION['user_id'])) {
     <title><?php echo e($tenant_title ?? 'Tenant Portal'); ?> | Boarding Hauz</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/boarding_hauz/assets/css/style.css?v=<?php echo (int) filemtime(__DIR__ . '/../assets/css/style.css'); ?>">
 </head>
 <body class="tenant-portal">

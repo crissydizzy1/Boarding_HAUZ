@@ -1070,7 +1070,7 @@ include __DIR__ . '/includes/tenant_header.php';
     <div class="messages-hero-content">
 
         <span class="messages-hero-badge">
-            💬 Tenant Support
+            <span class="material-symbols-outlined" aria-hidden="true">forum</span> Tenant Support
         </span>
 
         <h1>
@@ -1214,7 +1214,7 @@ include __DIR__ . '/includes/tenant_header.php';
                         <div class="chat-empty">
 
                             <div class="chat-empty-icon">
-                                💬
+                                <span class="material-symbols-outlined" aria-hidden="true">forum</span>
                             </div>
 
                             <h3>

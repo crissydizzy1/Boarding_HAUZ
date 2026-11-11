@@ -222,7 +222,6 @@ require_once __DIR__ . '/includes/header.php';
                         data-status="<?= e($status); ?>">
                         <div class="rooms-design-image">
                             <img src="<?= e($room['image_url']); ?>" alt="Photo of <?= e($roomTitle); ?>" loading="lazy">
-                            <span class="public-room-status public-room-status-<?= e(strtolower(str_replace(' ', '-', $room['occupancy_status']))); ?> rooms-design-status"><?= e($room['occupancy_status']); ?></span>
                         </div>
 
                         <div class="rooms-design-card-body">

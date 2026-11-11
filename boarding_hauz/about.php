@@ -14,7 +14,7 @@ require_once __DIR__ . '/includes/header.php';
 <section class="story-section">
     <div class="section-container story-grid">
         <article class="story-card story-card-main">
-            <div class="icon-box">📖</div>
+            <div class="icon-box"><span class="material-symbols-outlined" aria-hidden="true">menu_book</span></div>
             <h2>Our Story</h2>
             <p>Founded to serve students and young professionals across South Cotabato, Boarding Hauz provides accessible, secure, and modern living spaces. We eliminate the stress of searching for a comfortable home by matching tenants with clean, well-maintained rooms equipped with essential amenities.</p>
             <div class="established-tag">
@@ -24,13 +24,13 @@ require_once __DIR__ . '/includes/header.php';
 
         <div class="story-side">
             <article class="story-card">
-                <div class="icon-box">🎯</div>
+                <div class="icon-box"><span class="material-symbols-outlined" aria-hidden="true">track_changes</span></div>
                 <h3>Our Mission</h3>
                 <p>To deliver affordable, comfortable, and safe living spaces backed by reliable customer service and a hassle-free rental management system.</p>
             </article>
 
             <article class="story-card">
-                <div class="icon-box">🔭</div>
+                <div class="icon-box"><span class="material-symbols-outlined" aria-hidden="true">visibility</span></div>
                 <h3>Our Vision</h3>
                 <p>To become South Cotabato's premier student and professional living portal, renowned for quality accommodations and seamless tenant experience.</p>
             </article>
@@ -45,25 +45,25 @@ require_once __DIR__ . '/includes/header.php';
 
         <div class="features-grid">
             <article class="feature-card">
-                <div class="icon-box icon-box-soft">🔒</div>
+                <div class="icon-box icon-box-soft"><span class="material-symbols-outlined" aria-hidden="true">security</span></div>
                 <h3>24/7 Security</h3>
                 <p>CCTV surveillance and secure gates for your safety.</p>
             </article>
 
             <article class="feature-card">
-                <div class="icon-box icon-box-soft">📶</div>
+                <div class="icon-box icon-box-soft"><span class="material-symbols-outlined" aria-hidden="true">wifi</span></div>
                 <h3>High-Speed Wi-Fi</h3>
                 <p>Fast internet connectivity ideal for work and studies.</p>
             </article>
 
             <article class="feature-card">
-                <div class="icon-box icon-box-soft">📍</div>
+                <div class="icon-box icon-box-soft"><span class="material-symbols-outlined" aria-hidden="true">location_on</span></div>
                 <h3>Prime Location</h3>
                 <p>Minutes away from universities, malls, and transit hubs.</p>
             </article>
 
             <article class="feature-card">
-                <div class="icon-box icon-box-soft">💧</div>
+                <div class="icon-box icon-box-soft"><span class="material-symbols-outlined" aria-hidden="true">water_drop</span></div>
                 <h3>Complete Utilities</h3>
                 <p>Reliable water supply, submetered power, and maintenance.</p>
             </article>

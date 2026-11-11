@@ -610,7 +610,7 @@ if ($roomSelectionRequested && $roomSelectionError && $_SERVER['REQUEST_METHOD']
 
                 <div class="contact-list">
                     <div class="contact-item">
-                        <div class="contact-icon">📍</div>
+                        <div class="contact-icon"><span class="material-symbols-outlined" aria-hidden="true">location_on</span></div>
                         <div>
                             <strong>Address</strong>
                             <span>South Cotabato, Philippines</span>
@@ -618,7 +618,7 @@ if ($roomSelectionRequested && $roomSelectionError && $_SERVER['REQUEST_METHOD']
                     </div>
 
                     <div class="contact-item">
-                        <div class="contact-icon">☎</div>
+                        <div class="contact-icon"><span class="material-symbols-outlined" aria-hidden="true">call</span></div>
                         <div>
                             <strong>Phone</strong>
                             <span>0917-123-4567 / (084) 123-4567</span>
@@ -626,7 +626,7 @@ if ($roomSelectionRequested && $roomSelectionError && $_SERVER['REQUEST_METHOD']
                     </div>
 
                     <div class="contact-item">
-                        <div class="contact-icon">✉</div>
+                        <div class="contact-icon"><span class="material-symbols-outlined" aria-hidden="true">mail</span></div>
                         <div>
                             <strong>Email</strong>
                             <a href="mailto:admin@boardinghauz.com">admin@boardinghauz.com</a>
@@ -634,7 +634,7 @@ if ($roomSelectionRequested && $roomSelectionError && $_SERVER['REQUEST_METHOD']
                     </div>
 
                     <div class="contact-item">
-                        <div class="contact-icon">◷</div>
+                        <div class="contact-icon"><span class="material-symbols-outlined" aria-hidden="true">schedule</span></div>
                         <div>
                             <strong>Office Hours</strong>
                             <span>Mon – Sat: 8:00 AM – 6:00 PM</span>
@@ -758,7 +758,7 @@ if ($roomSelectionRequested && $roomSelectionError && $_SERVER['REQUEST_METHOD']
                         <textarea id="message" name="message" maxlength="2000" placeholder="Write your inquiry or viewing request here..." required><?php echo e($form['message']); ?></textarea>
                     </div>
 
-                    <button type="submit" class="btn-primary">➤ SUBMIT INQUIRY</button>
+                    <button type="submit" class="btn-primary"><span class="material-symbols-outlined" aria-hidden="true">send</span> SUBMIT INQUIRY</button>
                 </form>
                 <?php if (!$inquiryRoom): ?>
                     <script>
@@ -794,13 +794,13 @@ if ($roomSelectionRequested && $roomSelectionError && $_SERVER['REQUEST_METHOD']
                     <h2>Our Locations Across South Cotabato</h2>
                     <p class="map-subtitle">Visit our main leasing office and view available rooms directly.</p>
                 </div>
-                <span class="map-badge">📍 South Cotabato</span>
+                <span class="map-badge"><span class="material-symbols-outlined" aria-hidden="true">location_on</span> South Cotabato</span>
             </div>
 
             <div class="map-box" aria-label="Location map placeholder">
                 <div class="map-content">
                     <strong>[ LOCATION MAP ]</strong>
-                    <span>📍 | INTERACTIVE MAP EMBED - SURALLAH |</span><br>
+                    <span><span class="material-symbols-outlined" aria-hidden="true">location_on</span> | INTERACTIVE MAP EMBED - SURALLAH |</span><br>
                     <span>South Cotabato, Philippines</span>
                 </div>
             </div>

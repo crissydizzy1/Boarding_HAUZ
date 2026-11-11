@@ -2713,7 +2713,7 @@ body.tenant-portal {
                     <span><strong>Report Maintenance Issue</strong><span>Create a request for repairs and checks</span></span>
                 </a>
                 <a class="quick-action-card" href="tenant_messages.php">
-                    <span class="quick-action-icon" aria-hidden="true">✉</span>
+                    <span class="quick-action-icon material-symbols-outlined" aria-hidden="true">mail</span>
                     <span><strong>Message Management</strong><span>Contact management for assistance</span></span>
                 </a>
             </div>
@@ -3130,7 +3130,7 @@ body.tenant-portal {
                     </span>
 
                     <span class="summary-icon">
-                        ✉
+                        <span class="material-symbols-outlined" aria-hidden="true">mail</span>
                     </span>
 
                 </div>
